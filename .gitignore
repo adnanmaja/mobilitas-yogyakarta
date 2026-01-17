@@ -1,0 +1,16 @@
+.env
+dist/
+node_modules/
+__pycache__/
+.DS_Store
+*.log
+web-local/ # Ignore local web server config
+cache/ # Ignore cache directory
+osm_cache/ # Ignore OpenStreetMap cache directory
+experimental/ # Uninmportant files i use during development
+data/raw/ # Some very large data in .geojson, .json, .csv, and .tif
+*.geojson
+*.tif
+*.json
+*.pkl
+*.csv
