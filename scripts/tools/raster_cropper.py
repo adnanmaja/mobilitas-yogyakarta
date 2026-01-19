@@ -16,7 +16,6 @@ with rasterio.open("idn_pop_2025_CN_100m_R2025A_v1.tif") as src:
     out_image, out_transform = mask(src, shapes, crop=True)
     out_meta = src.meta.copy()
 
-# Update metadata
 out_meta.update({
     "driver": "GTiff",
     "height": out_image.shape[1],

@@ -18,7 +18,7 @@ def simple_origin_analysis():
     west, south, east, north = boundary.total_bounds
     
     # Create grid
-    cell_size = 1000  # meter
+    cell_size = 700  # meter
     cols = np.arange(west, east, cell_size)
     rows = np.arange(south, north, cell_size)
     
@@ -45,7 +45,7 @@ def simple_origin_analysis():
     try:
         print("Processing WorldPop raster...")
 
-        reprojected_path = "external_data/clipped_utm49s_2025_yogyakarta_100m.tif"
+        reprojected_path = "data/raw/clipped_utm49s_2025_yogyakarta_100m.tif"
         with rasterio.open(reprojected_path) as src:
             population_scores = []
             
@@ -214,15 +214,15 @@ axes[1, 2].set_title('Grid Overlay with Origin Scores')
 
 # Adjust layout
 plt.tight_layout()
-plt.savefig('exps/origin_v2_1_500m.png', dpi=300, bbox_inches='tight')
+plt.savefig('data/figures/origin_v2_1_700m.png', dpi=300, bbox_inches='tight')
 plt.show()
 
 # Save data to geojson
 export_gdf = grid.copy()
 export_gdf['geometry'] = export_gdf.geometry.centroid
 export_gdf = export_gdf.to_crs(epsg=4326) # To match mapbox's system
-export_gdf.to_file('exps/origin_v2_1_500m.geojson', driver='geoJSON')
-print("Data saved to 'exps/origin_v2_1_500m.geojson'")
+export_gdf.to_file('data/raw/origin_v2_1_700m.geojson', driver='geoJSON')
+print("Data saved to 'data/raw/origin_v2_1_700m.geojson'")
 
 # Print some statistics
 print("\n=== STATISTICS ===")

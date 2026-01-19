@@ -14,3 +14,4 @@ data/raw/ # Some very large data in .geojson, .json, .csv, and .tif
 *.json
 *.pkl
 *.csv
+*.gpkg
