@@ -20,7 +20,15 @@ The region, Special Region of Yogyakarta was divided into a grid of 1km2. This r
 
 ### B. Trip Generation & Distribution
 Trips between an origin grid `i` and a destination grid `j` are calculated based on the attractiveness of `j` and the impedance (discouraging effect) of distance.
-- **Formula** : ``T_ij = k * (O_i^α * D_j^β) / (d_ij^γ)``
+- **Formula** : ``T_ij = 𝑘 * (O_i^α * D_j^β) / (d_ij^𝛾)``, where:
+    * ``T_ij`` = Estimated number of trips from origin cell i to destination cell j.
+    * ``O_i`` = Origin “mass” of cell i, representing the trip-generating potential of the area (e.g., population density and local road presence).
+    * ``D_j^β`` = Destination “mass” of cell j, representing the attractiveness of the area (e.g., points of interest, road density, intersections, and special locations).
+    * ``d_ij`` = Distance between origin cell i and destination cell j, acting as a deterrence factor for longer trips.
+    * ``𝑘`` = Scaling constant used to adjust overall trip volume to a reasonable magnitude.
+    * ``α`` = Controls how strongly trip generation scales with origin mass.
+    * ``β`` = Controls how strongly destination attractiveness influences trip volume.
+    * ``𝛾`` = Distance decay parameter; higher values penalize long-distance trips more strongly.
 - **Parameters** : ``α=1.0, β=1.0, γ=2.0`` These parameters control the sensitivity to origin mass, destination mass, and distance decay. The values were chosen as standard defaults for an initial proof-of-concept simulation, following common practice in rudimentary gravity models.
 - **Output** :  An Origin-Destination (OD) matrix containing estimated trip volumes between all grid pairs.
 
