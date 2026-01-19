@@ -10,6 +10,9 @@ import pickle
 from collections import defaultdict
 from threading import Lock
 from concurrent.futures import ThreadPoolExecutor
+import ijson
+from scipy.sparse import csr_matrix
+from scipy.sparse.csgraph import dijkstra
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -27,9 +30,7 @@ class VectorRouter:
         os.makedirs(cache_dir, exist_ok=True)
 
     def add_impedance(self):
-        """Add travel cost based on road hierarchy"""
-        
-        # Preference weights. Lower = better (preferable)
+        # Add travel cost based on road hierarchy. Lower = better (preferable)
         ROAD_WEIGHTS = {
             'motorway': 1.0,      
             'trunk': 1.0,
@@ -55,6 +56,27 @@ class VectorRouter:
             # Effective length = actual length × penalty
             data['impedance'] = length * penalty
 
+    def build_sparse_graph(self):
+        # Convert NetworkX graph to scipy sparse matrix (scipy is much much faster)
+        nodes = list(self.graph.nodes())
+        self.node_to_idx = {node: idx for idx, node in enumerate(nodes)}
+        self.idx_to_node = {idx: node for node, idx in self.node_to_idx.items()}
+        
+        n = len(nodes)
+        row, col, data = [], [], []
+        
+        for u, v, edge_data in self.graph.edges(data=True):
+            u_idx = self.node_to_idx[u]
+            v_idx = self.node_to_idx[v]
+            impedance = edge_data.get('impedance', edge_data.get('length', 0))
+            
+            row.append(u_idx)
+            col.append(v_idx)
+            data.append(impedance)
+        
+        self.sparse_graph = csr_matrix((data, (row, col)), shape=(n, n))
+        logger.info(f"Built sparse graph: {n} nodes, {len(data)} edges")
+
     # Load OSM street network
     def load_network(self, force_download: bool = False):
         cache_file = os.path.join(self.cache_dir, f"graph_{self.place_name.replace(', ', '_')}.pkl")
@@ -72,6 +94,7 @@ class VectorRouter:
         
         self.graph_proj = ox.project_graph(self.graph)
         self.add_impedance()
+        self.build_sparse_graph()
         logger.info(f"Loaded: {len(self.graph.nodes)} nodes, {len(self.graph.edges)} edges")
         
     # Load point coordinates and OD vectors
@@ -89,36 +112,32 @@ class VectorRouter:
             }
         
         logger.info(f"Loading vectors from {vectors_file}")
-        with open(vectors_file, 'r') as f:
-            raw_vectors = json.load(f)
-        
+ 
         # Filter vectors (faster compute time)
-        FLOW_EPS = 1e-6
-        TOP_K = 25
+        FLOW_EPS = 0 #1e-6
+        TOP_K = 30
 
         self.vectors_by_origin = {}
 
-        for item in raw_vectors:
-            origin_id = item['origin_id']
-
-            # filter tiny flows
-            valid_dests = [
-                d for d in item['destinations']
-                if d['trips'] > FLOW_EPS
-            ]
-
-            # keep only top-K
-            valid_dests = sorted(
-                valid_dests,
-                key=lambda d: d['trips'],
-                reverse=True
-            )[:TOP_K]
-
-            if not valid_dests:
-                continue
-
-            self.vectors_by_origin[origin_id] = valid_dests
-
+        with open(vectors_file, 'rb') as f:
+            # Stream the array items one by one
+            for item in ijson.items(f, 'item'):
+                origin_id = item['origin_id']
+                
+                valid_dests = [
+                    d for d in item['destinations']
+                    if d['trips'] > FLOW_EPS
+                ]
+                
+                valid_dests = sorted(
+                    valid_dests,
+                    key=lambda d: d['trips'],
+                    reverse=True
+                )[:TOP_K]
+                
+                if valid_dests:
+                    self.vectors_by_origin[origin_id] = valid_dests
+        
         logger.info(
             f"Loaded {len(self.points)} points and "
             f"{sum(len(v) for v in self.vectors_by_origin.values())} OD pairs after filtering"
@@ -149,9 +168,13 @@ class VectorRouter:
         if not src_node:
             return
 
+        src_idx = self.node_to_idx[src_node]
+
         try:
-            lengths, paths = nx.single_source_dijkstra(
-                self.graph, src_node, weight='impedance'
+            distances, predecessors = dijkstra(
+                self.sparse_graph,
+                indices=src_idx,
+                return_predecessors=True
             )
         except Exception as e:
             logger.warning(f"Routing failed for origin {origin_id}: {e}")
@@ -162,10 +185,27 @@ class VectorRouter:
             flow = dest['trips']
 
             dest_node = self.point_to_node.get(dest_id)
-            if dest_node not in paths:
+            if dest_node is None:
+                continue
+            
+            dest_idx = self.node_to_idx[dest_node]
+            
+            if predecessors[dest_idx] == -9999:
                 continue
 
-            route = paths[dest_node]
+            # Reconstruct path
+            route = []
+            current = dest_idx
+            while current != src_idx:
+                route.append(self.idx_to_node[current])
+                current = predecessors[current]
+                if current == -9999:
+                    break
+            if current == src_idx:
+                route.append(self.idx_to_node[src_idx])
+                route.reverse()
+            else:
+                continue
 
             # Accumulate edge flows
             with self.flow_lock:
@@ -173,7 +213,7 @@ class VectorRouter:
                     # Get the edge with minimum length
                     edges = self.graph[u][v]
                     key = min(edges.keys(), key=lambda k: edges[k].get('length', float('inf')))
-                    self.edge_flows[(u, v, key)] += flow
+                    self.edge_flows[(u, v, key)] += float(flow)
 
 
     def find_nearest_node(self, lat: float, lon: float):
@@ -292,15 +332,15 @@ def main():
     
     # Load data
     router.load_data(
-        points_file="data/combined_1000m_centroids.geojson",
-        vectors_file="data/od_vectors.json"
+        points_file="data/raw/combined_v4_weekend_1000m.geojson",
+        vectors_file="data/raw/weekend_od_vectors.json"
     )
 
     # Pre-snap all points to nearest nodes
     router.precompute_nearest_nodes()
     
     # Process all vectors
-    router.process_all(output_file='data/routed_vectors2.geojson')
+    router.process_all(output_file='data/raw/weekend_routed_vectors_1000m.geojson')
     
     logger.info("Complete!")
 
