@@ -1,0 +1,15 @@
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Inject Token
+        run: sed -i "s/MAPBOX_TOKEN/${{ secrets.MAPBOX_TOKEN }}/g" web-build/app.js
+
+      - name: Deploy to GitHub Pages
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: web-build
+          branch: gh-pages
