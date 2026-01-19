@@ -7,7 +7,7 @@ As I fell into urban planning content, a simple question stuck with me: instead 
 Anyway, its a computational simulation modeling origin-destination traffic patterns, route assignment, and congestion levels across Yogyakarta's road network. The model generates visual heatmaps of traffic flow and congestion, which can hypothetically be used to identify chronic choke points and explore hypothetical transport or infrastructure scenarios before real-world implementation.
 
 ## Project Scope
-This project is an exploratory, proof-of-concept simulation developed as a personal winter break project. The goal is not predictive accuracy, but to understand how population distribution, destinations, and road networks interact to produce congestion patterns at a city scale. 
+This project is an exploratory, proof-of-concept simulation developed as a personal semester break project. The goal is not predictive accuracy, but to understand how population distribution, destinations, and road networks interact to produce congestion patterns at a city scale. 
 
 ## Methodology & Pipeline
 ### A. Data Preparation & Gridding
