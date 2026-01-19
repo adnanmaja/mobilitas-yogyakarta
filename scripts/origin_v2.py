@@ -18,7 +18,7 @@ def simple_origin_analysis():
     west, south, east, north = boundary.total_bounds
     
     # Create grid
-    cell_size = 700  # meter
+    cell_size = 1000  # meter
     cols = np.arange(west, east, cell_size)
     rows = np.arange(south, north, cell_size)
     
