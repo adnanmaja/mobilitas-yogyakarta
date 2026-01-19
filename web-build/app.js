@@ -4,6 +4,8 @@ document.addEventListener('DOMContentLoaded', function() {
     mapboxgl.accessToken = mapboxToken;
 
     let protocol = new pmtiles.Protocol();
+    console.log(mapboxgl.version); 
+    console.log(typeof mapboxgl.addProtocol);
     mapboxgl.addProtocol("pmtiles", protocol.tile);
 
     const map = new mapboxgl.Map({
