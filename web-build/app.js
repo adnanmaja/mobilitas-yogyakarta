@@ -1,10 +1,7 @@
 document.addEventListener('DOMContentLoaded', function() {
-    // Load token from config
-    if (typeof CONFIG === 'undefined') {
-    console.error('CONFIG not loaded. Make sure to run build script first.');
-    }
 
-    mapboxgl.accessToken = CONFIG.mapboxToken;
+    const mapboxToken = 'MAPBOX_TOKEN';
+    mapboxgl.accessToken = mapboxToken;
 
     let protocol = new pmtiles.Protocol();
     mapboxgl.addProtocol("pmtiles", protocol.tile);
@@ -252,7 +249,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     if (learnMoreBtn) {
       learnMoreBtn.addEventListener('click', () => {
-        alert('This visualization shows mobility patterns in Yogyakarta, Indonesia. It displays origins, destinations, traffic flows, and congestion levels at different times of day.');
+        window.location.href = 'https://github.com/adnanmaja/mobilitas-yogyakarta';
       });
     }
   }
