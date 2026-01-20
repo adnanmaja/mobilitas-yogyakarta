@@ -4,16 +4,18 @@ document.addEventListener('DOMContentLoaded', function() {
     let protocol = new pmtiles.Protocol();
     maplibregl.addProtocol("pmtiles", protocol.tile);
 
+    const V3ye904JSwMb7ltMzg6s = 'V3ye904JSwMb7ltMzg6s';
+
     const map = new maplibregl.Map({
         container: 'map',
-        style: 'https://tiles.openfreemap.org/styles/dark',
+        style: `https://api.maptiler.com/maps/dataviz-dark/style.json?key=${V3ye904JSwMb7ltMzg6s}`,
         center: [110.3695, -7.7956],
         zoom: 11,
         pitch: 0,
         bearing: 0
     });
 
-  // Disable rotation for flat feel
+
   map.dragRotate.disable();
   map.touchZoomRotate.disableRotation();
 
@@ -305,7 +307,7 @@ document.addEventListener('DOMContentLoaded', function() {
       type: 'circle',
       source: 'origins_300',
       'source-layer': 'dest_300',
-      minzoom: 12,
+      minzoom: 14,
       paint: {
         'circle-radius': [
           'interpolate',
@@ -338,7 +340,7 @@ document.addEventListener('DOMContentLoaded', function() {
       type: 'circle',
       source: 'origins_1000',
       'source-layer': 'dest_300',
-      maxzoom: 12,
+      maxzoom: 14,
       paint: {
         'circle-radius': [
           'interpolate',
@@ -356,7 +358,7 @@ document.addEventListener('DOMContentLoaded', function() {
           100, '#6ec6ff'
         ],
         'circle-opacity': 0.5,
-        'circle-blur': 0.2
+        'circle-blur': 0.3
       }
     });
 
@@ -377,7 +379,7 @@ document.addEventListener('DOMContentLoaded', function() {
       type: 'circle',
       source: 'destinations_300',
       'source-layer': 'dest_300',
-      minzoom: 12,
+      minzoom: 14,
       paint: {
         'circle-radius': [
           'interpolate',
@@ -410,7 +412,7 @@ document.addEventListener('DOMContentLoaded', function() {
       type: 'circle',
       source: 'destinations_1000',
       'source-layer': 'dest_300',
-      maxzoom: 12,
+      maxzoom: 14,
       paint: {
         'circle-radius': [
           'interpolate',
@@ -434,7 +436,7 @@ document.addEventListener('DOMContentLoaded', function() {
           0, 0.3,
           100, 0.7
         ],
-        'circle-blur': 0.5
+        'circle-blur': 0.3
       }
     });
 
@@ -451,7 +453,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     map.addSource('weekend-flow-data', {
         type: 'vector',
-        url: 'pmtiles://https://adnanmaja.github.io/mobilitas-yogyakarta/data/weekendrouted_vectors_1000m_edge_flows.pmtiles',
+        url: 'pmtiles://https://adnanmaja.github.io/mobilitas-yogyakarta/data/weekend_routed_vectors_1000m_edge_flows.pmtiles',
         attribution: ''
     });
 
@@ -564,6 +566,7 @@ document.addEventListener('DOMContentLoaded', function() {
       'type': 'line',
       'source': 'peak-congestion-data',
       'source-layer': 'default',
+      'filter': ['>=', ['get', 'congestion'], 1.1355],
       'layout': {
         'line-join': 'round',
         'line-cap': 'round'
@@ -583,8 +586,8 @@ document.addEventListener('DOMContentLoaded', function() {
           0.0039, '#2ecc71',
           0.1529, '#f1c40f',
           0.4774, '#e67e22',
-          1.1355, '#e74c3c',
-          2.0736, '#c0392b',
+          1.1356, '#e74c3c',
+          2.0736, '#c0392b', 
           2.8561, '#8e44ad'
         ],
         'line-opacity': 0.8
@@ -595,6 +598,7 @@ document.addEventListener('DOMContentLoaded', function() {
       'id': 'off-peak-congestion-layer',
       'type': 'line',
       'source': 'off-peak-congestion-data',
+      'filter': ['>=', ['get', 'congestion'], 1.1355],
       'source-layer': 'default',
       'layout': {
         'line-join': 'round',
@@ -627,6 +631,7 @@ document.addEventListener('DOMContentLoaded', function() {
       'id': 'weekend-congestion-layer',
       'type': 'line',
       'source': 'weekend-congestion-data',
+      'filter': ['>=', ['get', 'congestion'], 1.1355],
       'source-layer': 'default',
       'layout': {
         'line-join': 'round',
@@ -665,3 +670,22 @@ document.addEventListener('DOMContentLoaded', function() {
     setupLandingPage();
   });
 });
+
+
+// Email popup functionality
+const emailButton = document.getElementById('email-button');
+const emailPopup = document.getElementById('email-popup');
+const copyEmailBtn = document.getElementById('copy-email');
+
+emailButton.addEventListener('click', (e) => {
+  e.stopPropagation();
+  emailPopup.classList.toggle('active');
+});
+
+// Close popup when clicking outside
+document.addEventListener('click', (e) => {
+  if (!emailPopup.contains(e.target) && !emailButton.contains(e.target)) {
+    emailPopup.classList.remove('active');
+  }
+});
+
