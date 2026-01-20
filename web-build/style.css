@@ -109,7 +109,7 @@ button:hover {
   background: rgba(20, 20, 20, 1);
   border-radius: 6px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  width: 200px;
+  width: 250px;
   overflow: hidden;
   transition: transform 0.2s ease, opacity 0.2s ease;
   opacity: 1;
@@ -127,12 +127,12 @@ button:hover {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 16px;
+  padding: 14px 18px;
   background: rgba(20, 20, 20, 1);
 }
 
 .panel-title {
-  font-size: 11px;
+  font-size: 16px;
   font-weight: 500;
   color: white;
 }
@@ -168,7 +168,7 @@ button:hover {
   display: flex;
   align-items: center;
   justify-content: space-between; 
-  padding: 12px 20px; 
+  padding: 13px 21px; 
   cursor: pointer;
   transition: background-color 0.2s;
 }
@@ -190,7 +190,7 @@ button:hover {
 }
 
 .layer-label {
-  font-size: 10px;
+  font-size: 15px;
   color: #e8eaed; 
   font-weight: 400;
 }
@@ -220,9 +220,9 @@ button:hover {
 }
 
 .layer-desc {
-  font-size: 9px;
+  font-size: 13px;
   color: #9aa0a6;
-  margin-top: 2px;
+  margin-top: 3px;
 }
 
 /* Time Selector Dropdown */
@@ -327,18 +327,6 @@ button:hover {
   display: block;
 }
 
-
-
-
-/* Remove old time button styles */
-/* .time-buttons {
-  display: none;
-}
-
-.time-btn {
-  display: none;
-} */
-
 .panel-toggle {
   background: rgba(20, 20, 20, 1);
   border-radius: 8px;
@@ -359,7 +347,7 @@ button:hover {
 }
 
 .toggle-icon {
-  font-size: 14 px;
+  font-size: 18 px;
   color: #e8eaed;
   align-items: center; 
   justify-content: center;
@@ -367,7 +355,7 @@ button:hover {
 }
 
 .panel-toggle span {
-  font-size: 12px;
+  font-size: 16px;
   color: #e8eaed;
   font-weight: 500;
 }
