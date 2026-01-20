@@ -5,11 +5,10 @@
   <title>Yogyakarta Movement Patterns</title>
 
   <!-- Mapbox CSS -->
-  <script src='https://api.mapbox.com/mapbox-gl-js/v3.0.1/mapbox-gl.js'></script>
-  <link href='https://api.mapbox.com/mapbox-gl-js/v3.0.1/mapbox-gl.css' rel='stylesheet' />
+  
+  <link href='https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css' rel='stylesheet' />
   <link rel="stylesheet" href="style.css" />
   <link href="https://fonts.googleapis.com" rel="stylesheet"/>
-  <script src="https://unpkg.com/pmtiles@2.11.0/dist/index.js"></script>
  
 </head>
 
@@ -101,7 +100,9 @@
   <!-- Map -->
   <div id="map"></div>
 
-  <!-- Mapbox JS -->
+  <!-- Maplibre JS -->
+  <script src='https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js'></script>
+  <script src="https://unpkg.com/pmtiles@3.0.7/dist/pmtiles.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

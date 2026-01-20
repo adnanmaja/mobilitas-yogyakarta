@@ -45,7 +45,7 @@ well its pretty much is this set of concepts, of which i cant explain:
 - To better reflect real-world variability such as driver behavior, traffic signals, and unmodeled disruptions, controlled random noise is added to the congestion values. This prevents unrealistically uniform patterns and produces more organic-looking congestion distributions.
 
 ## Results & Vsiualization
-The resulting data have been visualized into an interactive map using mapbox. Here's the link: didntexistyet.com <br>
+The resulting data have been visualized into an interactive map using maplibre. [Check it out!](https://adnanmaja.github.io/mobilitas-yogyakarta/web-build/index.html) <br>
 Additionally, figures can be found at ```data/figures```
 
 ## Limitations & Assumptions
