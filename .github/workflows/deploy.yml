@@ -21,6 +21,11 @@ jobs:
       - name: Inject Token
         run: sed -i "s/MAPTILER_TOKEN/${{ secrets.MAPTILER_TOKEN }}/g" web-build/app.js
 
+      - name: Copy data into web-build
+        run: |
+          mkdir -p web-build/data
+          cp -r data/* web-build/data/
+
       - name: Deploy to GitHub Pages
         uses: JamesIves/github-pages-deploy-action@v4
         with:
