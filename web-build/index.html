@@ -2,25 +2,54 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Yogyakarta Movement Patterns</title>
+  <title>Yogyakarta Traffic Flow</title>
 
-  <!-- Mapbox CSS -->
-  
   <link href='https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css' rel='stylesheet' />
   <link rel="stylesheet" href="style.css" />
   <link href="https://fonts.googleapis.com" rel="stylesheet"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
  
 </head>
 
 <body>
 
-    <div id="landing-page">
+  <div id="landing-page">
     <div class="landing-content">
       <h1>Traffic Flow and Congestion in Daerah Istimewa Yogyakarta</h1>
       <p>Visualizing daily mobility patterns in Daerah Istimewa Yogyakarta</p>
       <button id="enter-map">Enter Map</button>
       <button id="learn-more">Learn More</button>
     </div>
+
+    <footer class="social-footer">
+      <div class="social-container">
+        <span class="footer-label">Rafa Atmaja</span>
+        <div class="footer-social-links">
+
+          <a href="https://github.com/adnanmaja" target="_blank" class="footer-social-link">
+            <i class="fab fa-github"></i>
+            <span>GitHub</span>
+          </a>
+
+          <a href="https://www.linkedin.com/in/rafa-adnan-0329b4321" target="_blank" class="footer-social-link">
+            <i class="fab fa-linkedin"></i>
+            <span>LinkedIn</span>
+          </a>
+
+          <div class="email-wrapper" style="position: relative;">
+            <div class="footer-social-link email-link" id="email-button">
+              <i class="fas fa-envelope"></i>
+              <span>Email</span>
+            </div>
+            <div class="email-popup" id="email-popup">
+              <span class="email-address">rafaadnan46@gmail.com</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </footer>
+
   </div>
 
 <!-- UI Control Panel -->

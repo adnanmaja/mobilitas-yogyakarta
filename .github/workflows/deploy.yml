@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Inject Token
-        run: sed -i "s/MAPBOX_TOKEN/${{ secrets.MAPBOX_TOKEN }}/g" web-build/app.js
+        run: sed -i "s/MAPTILER_TOKEN/${{ secrets.MAPTILER_TOKEN }}/g" web-build/app.js
 
       - name: Deploy to GitHub Pages
         uses: JamesIves/github-pages-deploy-action@v4
