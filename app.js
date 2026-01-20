@@ -1,16 +1,12 @@
 document.addEventListener('DOMContentLoaded', function() {
 
-    const mapboxToken = 'pk.eyJ1IjoibWFzcmFwbGEiLCJhIjoiY21rbDk5OXNqMDJvNjNmc2JuYXNpZnN5MCJ9.0XtfV0HYo-Yloka8ulJSsg';
-    mapboxgl.accessToken = mapboxToken;
-
+    // Add PMTiles protocol
     let protocol = new pmtiles.Protocol();
-    console.log(mapboxgl.version); 
-    console.log(typeof mapboxgl.addProtocol);
-    mapboxgl.addProtocol("pmtiles", protocol.tile);
+    maplibregl.addProtocol("pmtiles", protocol.tile);
 
-    const map = new mapboxgl.Map({
+    const map = new maplibregl.Map({
         container: 'map',
-        style: 'mapbox://styles/mapbox/dark-v11',
+        style: 'https://tiles.openfreemap.org/styles/dark',
         center: [110.3695, -7.7956],
         zoom: 11,
         pitch: 0,
@@ -295,12 +291,12 @@ document.addEventListener('DOMContentLoaded', function() {
     // ORIGINS
     map.addSource('origins_1000', {
         type: 'vector',
-        url: 'adnanmaja.github.io/mobilitas-yogyakarta/data/origin_v2_1_1000m.pmtiles',
+        url: 'pmtiles://https://adnanmaja.github.io/mobilitas-yogyakarta/data/origin_v2_1_1000m.pmtiles',
         attribution: ''
     });
     map.addSource('origins_300', {
         type: 'vector',
-        url: 'adnanmaja.github.io/mobilitas-yogyakarta/data/origin_v2_1_300m.pmtiles',
+        url: 'pmtiles://https://adnanmaja.github.io/mobilitas-yogyakarta/data/origin_v2_1_300m.pmtiles',
         attribution: ''
     });
 
@@ -308,7 +304,7 @@ document.addEventListener('DOMContentLoaded', function() {
       id: 'origins-layer-300m',
       type: 'circle',
       source: 'origins_300',
-      'source-layer': 'dest_300', // forgot to rename the layers
+      'source-layer': 'dest_300',
       minzoom: 12,
       paint: {
         'circle-radius': [
@@ -341,7 +337,7 @@ document.addEventListener('DOMContentLoaded', function() {
       id: 'origins-layer-1km',
       type: 'circle',
       source: 'origins_1000',
-      'source-layer': 'dest_300', // forgot to rename the layers
+      'source-layer': 'dest_300',
       maxzoom: 12,
       paint: {
         'circle-radius': [
@@ -367,12 +363,12 @@ document.addEventListener('DOMContentLoaded', function() {
     // DESTINATIONS
     map.addSource('destinations_1000', {
         type: 'vector',
-        url: 'adnanmaja.github.io/mobilitas-yogyakarta/data/destination_v3_1000m.pmtiles',
+        url: 'pmtiles://https://adnanmaja.github.io/mobilitas-yogyakarta/data/destination_v3_1000m.pmtiles',
         attribution: ''
     });
     map.addSource('destinations_300', {
         type: 'vector',
-        url: 'adnanmaja.github.io/mobilitas-yogyakarta/data/destination_v3_300m.pmtiles',
+        url: 'pmtiles://https://adnanmaja.github.io/mobilitas-yogyakarta/data/destination_v3_300m.pmtiles',
         attribution: ''
     });
 
@@ -380,7 +376,7 @@ document.addEventListener('DOMContentLoaded', function() {
       id: 'destinations-layer-300m',
       type: 'circle',
       source: 'destinations_300',
-      'source-layer': 'dest_300', // forgot to rename the layers
+      'source-layer': 'dest_300',
       minzoom: 12,
       paint: {
         'circle-radius': [
@@ -413,7 +409,7 @@ document.addEventListener('DOMContentLoaded', function() {
       id: 'destinations-layer-1km',
       type: 'circle',
       source: 'destinations_1000',
-      'source-layer': 'dest_300', // forgot to rename the layers
+      'source-layer': 'dest_300',
       maxzoom: 12,
       paint: {
         'circle-radius': [
@@ -445,17 +441,17 @@ document.addEventListener('DOMContentLoaded', function() {
     // EDGE FLOWS
     map.addSource('peak-flow-data', {
         type: 'vector',
-        url: 'adnanmaja.github.io/mobilitas-yogyakarta/data/peak_routed_vectors_1000m_edge_flows.pmtiles',
+        url: 'pmtiles://https://adnanmaja.github.io/mobilitas-yogyakarta/data/peak_routed_vectors_1000m_edge_flows.pmtiles',
         attribution: ''
     });
     map.addSource('off-peak-flow-data', {
         type: 'vector',
-        url: 'adnanmaja.github.io/mobilitas-yogyakarta/data/off_peak_routed_vectors_1000m_edge_flows.pmtiles',
+        url: 'pmtiles://https://adnanmaja.github.io/mobilitas-yogyakarta/data/off_peak_routed_vectors_1000m_edge_flows.pmtiles',
         attribution: ''
     });
     map.addSource('weekend-flow-data', {
         type: 'vector',
-        url: 'adnanmaja.github.io/mobilitas-yogyakarta/data/weekendrouted_vectors_1000m_edge_flows.pmtiles',
+        url: 'pmtiles://https://adnanmaja.github.io/mobilitas-yogyakarta/data/weekendrouted_vectors_1000m_edge_flows.pmtiles',
         attribution: ''
     });
 
@@ -549,17 +545,17 @@ document.addEventListener('DOMContentLoaded', function() {
     // CONGESTIONS
     map.addSource('peak-congestion-data', {
         type: 'vector',
-        url: 'adnanmaja.github.io/mobilitas-yogyakarta/data/peak_routed_vectors_1000m_congestions.pmtiles',
+        url: 'pmtiles://https://adnanmaja.github.io/mobilitas-yogyakarta/data/peak_routed_vectors_1000m_congestions.pmtiles',
         attribution: ''
     });
     map.addSource('off-peak-congestion-data', {
         type: 'vector',
-        url: 'adnanmaja.github.io/mobilitas-yogyakarta/data/off_peak_routed_vectors_1000m_congestions.pmtiles',
+        url: 'pmtiles://https://adnanmaja.github.io/mobilitas-yogyakarta/data/off_peak_routed_vectors_1000m_congestions.pmtiles',
         attribution: ''
     });
     map.addSource('weekend-congestion-data', {
         type: 'vector',
-        url: 'adnanmaja.github.io/mobilitas-yogyakarta/data/weekend_routed_vectors_1000m_congestions.pmtiles',
+        url: 'pmtiles://https://adnanmaja.github.io/mobilitas-yogyakarta/data/weekend_routed_vectors_1000m_congestions.pmtiles',
         attribution: ''
     });
 
@@ -668,4 +664,4 @@ document.addEventListener('DOMContentLoaded', function() {
     setupPanelToggle();
     setupLandingPage();
   });
-}); 
+});
