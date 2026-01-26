@@ -20,8 +20,8 @@ BETA = 4           # congestion sharpness
 NOISE = 0.05       # ±5% flow noise
 R_MAX = 1.3        # clamp ratio
 
-input_path = "data/raw/weekend_routed_vectors_1000m_edge_flows.geojson"
-output_path = "data/raw/weekend_routed_vectors_1000m_congestions.geojson"
+input_path = "data/raw/rea_1000m_edge_flows.geojson"
+output_path = "data/raw/rea_1000m_congestions.geojson"
 
 
 # Load data

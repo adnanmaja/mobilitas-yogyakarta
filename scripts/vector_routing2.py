@@ -229,7 +229,7 @@ class VectorRouter:
     
     def process_all(self, output_file: str = 'routes.geojson', force=False):
         if not force and self.load_edge_flows_cache():
-            self.save_edge_flows(output_file.replace(".geojson", "_edge_flows.geojson"))
+            self.save_edge_flows(output_file)
             return
 
         origin_ids = list(self.vectors_by_origin.keys())
@@ -247,7 +247,7 @@ class VectorRouter:
         )
 
         self.save_edge_flows_cache()
-        self.save_edge_flows(output_file.replace(".geojson", "_edge_flows.geojson"))
+        self.save_edge_flows(output_file)
 
 
     # Save aggregated edge flows as GeoJSON
@@ -332,15 +332,15 @@ def main():
     
     # Load data
     router.load_data(
-        points_file="data/raw/combined_v4_weekend_1000m.geojson",
-        vectors_file="data/raw/weekend_od_vectors.json"
+        points_file="data/raw/rea_1000m.geojson",
+        vectors_file="data/raw/rea_1000m_vectors.json"
     )
 
     # Pre-snap all points to nearest nodes
     router.precompute_nearest_nodes()
     
     # Process all vectors
-    router.process_all(output_file='data/raw/weekend_routed_vectors_1000m.geojson')
+    router.process_all(output_file='data/raw/rea_1000m_edge_flows.geojson')
     
     logger.info("Complete!")
 
