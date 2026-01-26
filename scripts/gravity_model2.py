@@ -163,6 +163,167 @@ class GravityModelOD:
         
         return od_vectors, info_dict
     
+    def combine_od_vectors(
+        self,
+        vectors1: List[Dict], 
+        vectors2: List[Dict], 
+        vectors3: List[Dict], 
+        weights: Tuple[float, float, float],
+        n_grids: int
+    ) -> List[Dict]:
+        """
+        Combine multiple OD vectors with weights
+        """
+        w1, w2, w3 = weights
+        
+        # Convert to dictionaries for easier combination
+        od_dict = {i: {} for i in range(n_grids)}
+        
+        # Helper function to add vectors to dictionary
+        def add_to_dict(vectors, weight):
+            for vector in vectors:
+                origin_idx = vector['origin_idx']
+                for dest_idx, value in zip(vector['dest_indices'], vector['values']):
+                    key = (origin_idx, dest_idx)
+                    if key in od_dict[origin_idx]:
+                        od_dict[origin_idx][key] += value * weight
+                    else:
+                        od_dict[origin_idx][key] = value * weight
+        
+        # Add all vectors
+        add_to_dict(vectors1, w1)
+        add_to_dict(vectors2, w2)
+        add_to_dict(vectors3, w3)
+        
+        # Convert back to vector format
+        combined_vectors = []
+        
+        for origin_idx in range(n_grids):
+            if od_dict[origin_idx]:
+                dest_indices = []
+                values = []
+                
+                for (_, dest_idx), value in od_dict[origin_idx].items():
+                    if value > 1e-10:  # Apply threshold
+                        dest_indices.append(dest_idx)
+                        values.append(value)
+                
+                if dest_indices:  # Only add if there are non-zero destinations
+                    combined_vectors.append({
+                        'origin_idx': origin_idx,
+                        'dest_indices': np.array(dest_indices),
+                        'values': np.array(values)
+                    })
+        
+        return combined_vectors
+    
+    def calculate_combined_od(
+        self,
+        residential: np.ndarray,
+        employment: np.ndarray,
+        amenity: np.ndarray,
+        coordinates: np.ndarray,
+        grid_ids: np.ndarray,
+        weights: Tuple[float, float, float] = (0.5, 0.3, 0.2),  # w1, w2, w3
+        model_params: Dict[str, Dict] = None
+    ) -> Tuple[List[Dict], Dict]:
+        """
+        Calculate combined OD matrix from multiple trip purposes
+        
+        Parameters:
+        -----------
+        weights : Tuple[float, float, float]
+            Weights for HBW, HBNW, NHB trip purposes (w1, w2, w3)
+        model_params : Dict[str, Dict]
+            Optional dictionary with specific parameters for each model
+            Example: {
+                'HBW': {'alpha': 1.0, 'beta': 1.0, 'gamma': 2.0},
+                'HBNW': {'alpha': 1.0, 'beta': 1.0, 'gamma': 1.8},
+                'NHB': {'alpha': 1.0, 'beta': 1.0, 'gamma': 2.2}
+            }
+        """
+        
+        # Default parameters if not provided
+        if model_params is None:
+            model_params = {
+                'HBW': {'alpha': 1.0, 'beta': 1.0, 'gamma': 2.0},
+                'HBNW': {'alpha': 1.0, 'beta': 1.0, 'gamma': 2.0},
+                'NHB': {'alpha': 1.0, 'beta': 1.0, 'gamma': 2.0}
+            }
+        
+        w1, w2, w3 = weights
+        
+        # Calculate distance matrix once (reused for all models)
+        print("Calculating distance matrix...")
+        distance_matrix = cdist(coordinates, coordinates, metric='euclidean')
+        np.fill_diagonal(distance_matrix, 1.0)
+        
+        # 1. HBW: Residential → Employment
+        print("\n" + "=" * 50)
+        print("Calculating HBW trips (Residential → Employment)")
+        print("=" * 50)
+        model_hbw = GravityModelOD(**model_params['HBW'])
+        od_hbw, info_hbw = model_hbw.calculate_od_matrix(
+            origins=residential,
+            destinations=employment,
+            coordinates=coordinates,
+            distance_matrix=distance_matrix,
+            chunk_size=500
+        )
+        
+        # 2. HBNW: Residential → Amenity
+        print("\n" + "=" * 50)
+        print("Calculating HBNW trips (Residential → Amenity)")
+        print("=" * 50)
+        model_hbnw = GravityModelOD(**model_params['HBNW'])
+        od_hbnw, info_hbnw = model_hbnw.calculate_od_matrix(
+            origins=residential,
+            destinations=amenity,
+            coordinates=coordinates,
+            distance_matrix=distance_matrix,
+            chunk_size=500
+        )
+        
+        # 3. NHB: Employment → Amenity
+        print("\n" + "=" * 50)
+        print("Calculating NHB trips (Employment → Amenity)")
+        print("=" * 50)
+        model_nhb = GravityModelOD(**model_params['NHB'])
+        od_nhb, info_nhb = model_nhb.calculate_od_matrix(
+            origins=employment,
+            destinations=amenity,
+            coordinates=coordinates,
+            distance_matrix=distance_matrix,
+            chunk_size=500
+        )
+        
+        # Combine the OD matrices with weights
+        print("\n" + "=" * 50)
+        print("Combining trip purposes with weights")
+        print(f"Weights: HBW={w1:.2f}, HBNW={w2:.2f}, NHB={w3:.2f}")
+        print("=" * 50)
+        
+        combined_vectors = self.combine_od_vectors(
+            od_hbw, od_hbnw, od_nhb, 
+            weights=(w1, w2, w3), 
+            n_grids=len(residential)
+        )
+        
+        # Create combined info dictionary
+        combined_info = {
+            'weights': {
+                'HBW': w1,
+                'HBNW': w2,
+                'NHB': w3
+            },
+            'model_parameters': model_params,
+            'HBW_info': info_hbw,
+            'HBNW_info': info_hbnw,
+            'NHB_info': info_nhb
+        }
+        
+        return combined_vectors, combined_info
+    
     def _calculate_statistics_sparse(self, od_vectors: List[Dict], 
                                      origins: np.ndarray, 
                                      destinations: np.ndarray,
@@ -308,14 +469,16 @@ def load_data(filepath: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.nda
     coordinates = np.column_stack([gdf.geometry.x.values, gdf.geometry.y.values])
     
     # Find origin and destination columns
-    origin_cols = [col for col in gdf.columns if 'origin' in col.lower()]
-    dest_cols = [col for col in gdf.columns if 'destination' in col.lower() or 'dest' in col.lower()]
+    residential_cols = [col for col in gdf.columns if 'residential_intensity_norm' in col.lower()]
+    employment_cols = [col for col in gdf.columns if 'employment_edu_intensity_norm' in col.lower()]
+    amenity_cols = [col for col in gdf.columns if 'amenity_intensity_norm' in col.lower()]
     
-    if not origin_cols or not dest_cols:
+    if not residential_cols or not employment_cols or not amenity_cols:
         raise ValueError(f"Could not find origin/destination columns in: {list(gdf.columns)}")
     
-    origins = gdf[origin_cols[0]].values.astype(float)
-    destinations = gdf[dest_cols[0]].values.astype(float)
+    residential = gdf[residential_cols[0]].values.astype(float)
+    employment = gdf[employment_cols[0]].values.astype(float)
+    amenity = gdf[amenity_cols[0]].values.astype(float)
     
     # Get grid IDs
     id_cols = [col for col in gdf.columns if 'id' in col.lower()]
@@ -323,45 +486,62 @@ def load_data(filepath: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.nda
     
     print(f"\nData summary:")
     print(f"  Number of grids: {len(gdf)}")
-    print(f"  Origins: {origins.min():.1f} - {origins.max():.1f}")
-    print(f"  Destinations: {destinations.min():.1f} - {destinations.max():.1f}")
+    print(f"  Residential intensity: {residential.min():.1f} - {residential.max():.1f}")
+    print(f"  Employment intensity: {employment.min():.1f} - {employment.max():.1f}")
+    print(f"  Amenity intensity: {amenity.min():.1f} - {amenity.max():.1f}")
     
-    return origins, destinations, coordinates, grid_ids
+    return residential, employment, amenity, coordinates, grid_ids, gdf
 
 
 def main():
-    """Main execution function"""
-    print("MEMORY-EFFICIENT GRAVITY MODEL")
-    print("=" * 50)
+    """Main execution function for combined trip purposes"""
+    print("COMBINED GRAVITY MODEL FOR MULTIPLE TRIP PURPOSES")
+    print("=" * 60)
     
-    # Load data
-    origins, destinations, coordinates, grid_ids = load_data('data/raw/combined_v4_weekend_1000m.geojson')
+    # Load data with multiple intensities
+    residential, employment, amenity, coordinates, grid_ids, gdf = load_data(
+        'data/raw/rea_1000m.geojson'
+    )
     
-    # Initialize model
-    model = GravityModelOD(alpha=1.0, beta=1.0, gamma=2.0)
+    # Define weights for time of day (adjust these based on your analysis)
+    # Example: Morning peak might have higher HBW weight
+    weights = (0.5, 0.3, 0.2)  # w1 (HBW), w2 (HBNW), w3 (NHB)
     
-    # Calculate OD matrix with chunking (adjust chunk_size if needed)
-    # Reduce chunk_size (e.g., 200, 100) if still running out of memory
-    od_vectors, info_dict = model.calculate_od_matrix(
-        origins=origins,
-        destinations=destinations,
+    # Optional: Define different parameters for each trip purpose
+    model_params = {
+        'HBW': {'alpha': 1.0, 'beta': 1.0, 'gamma': 2.0},   # Work trips are more distance-sensitive
+        'HBNW': {'alpha': 0.9, 'beta': 0.9, 'gamma': 1.8},  # Non-work trips are less distance-sensitive
+        'NHB': {'alpha': 1.0, 'beta': 1.0, 'gamma': 2.2}    # Non-home-based trips might be different
+    }
+    
+    # Calculate combined OD matrix
+    model = GravityModelOD()
+    combined_vectors, combined_info = model.calculate_combined_od(
+        residential=residential,
+        employment=employment,
+        amenity=amenity,
         coordinates=coordinates,
-        total_trips=None,
-        distance_type='euclidean',
-        chunk_size=500  # Adjust this value based on your available memory
+        grid_ids=grid_ids,
+        weights=weights,
+        model_params=model_params
     )
     
-    # Export
+    # Export combined results
+    # Create instance for saving
     model.save_vectors_streaming(
-        od_vectors=od_vectors,
+        od_vectors=combined_vectors,
         grid_ids=grid_ids,
-        filename='data/raw/weekend_od_vectors.json',
-        chunk_size=1000  # Process 1000 vectors at a time
+        filename='data/raw/rea_1000m_vectors.json',
+        chunk_size=1000
     )
+    
+    # Save individual trip purposes for analysis
+    print("\nSaving individual trip purposes...")
     
     print("\n" + "=" * 60)
     print("PROCESS COMPLETED SUCCESSFULLY!")
     print("=" * 60)
+    print(f"Total combined vectors: {len(combined_vectors)}")
 
 
 if __name__ == "__main__":
