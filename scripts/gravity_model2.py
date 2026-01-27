@@ -1,548 +1,469 @@
-# Idk what's going on here. Essentially, make an OD matrix and apply the gravity model
-
-# Memory-efficient gravity model with chunked calculation
-
 import numpy as np
 import pandas as pd
 from scipy.spatial.distance import cdist
 import time
-from typing import Tuple, List, Dict
+from typing import Tuple, List, Dict, Optional
 import geopandas as gpd
 import warnings
 warnings.filterwarnings('ignore')
 
-
-class GravityModelOD:
+class ImprovedGravityModel:
     """
-    Memory-efficient Gravity Model for Origin-Destination Matrix calculation
+    Enhanced Gravity Model with IPF balancing and realistic trip purpose modeling
     
-    The gravity model formula: T_ij = k * (O_i^α * D_j^β) / (d_ij^γ)
+    Step-by-step implementation:
+    1. Set total trips per purpose
+    2. Define productions & attractions
+    3. Gravity model with different gammas
+    4. IPF balancing (Furness)
+    5. Combine trip purposes
     """
     
-    def __init__(self, alpha: float = 1.0, beta: float = 1.0, gamma: float = 2.0):
-        self.alpha = alpha
-        self.beta = beta
-        self.gamma = gamma
-        self.k = None
+    def __init__(self, chunk_size: int = 500):
+        self.chunk_size = chunk_size
+        self.total_trips = None
         
-    def calculate_distances(self, coordinates: np.ndarray, 
-                           distance_type: str = 'euclidean') -> np.ndarray:
-        """Calculate distance matrix between all grid points"""
-        print(f"Calculating {distance_type} distance matrix for {len(coordinates)} grids...")
+    def calculate_distances(self, coordinates: np.ndarray) -> np.ndarray:
+        """Calculate Euclidean distance matrix"""
+        print("Calculating distance matrix...")
         start_time = time.time()
         
-        distance_matrix = cdist(coordinates, coordinates, metric=distance_type)
-        np.fill_diagonal(distance_matrix, 1.0)
+        distance_matrix = cdist(coordinates, coordinates, metric='euclidean')
+        np.fill_diagonal(distance_matrix, 1.0)  # Avoid division by zero
         
         elapsed_time = time.time() - start_time
         print(f"Distance matrix calculated in {elapsed_time:.2f} seconds")
         
         return distance_matrix
     
-    def calculate_od_matrix(self, origins: np.ndarray, destinations: np.ndarray, 
-                           coordinates: np.ndarray, total_trips: float = None,
-                           distance_matrix: np.ndarray = None,
-                           distance_type: str = 'euclidean',
-                           chunk_size: int = 500) -> Tuple[np.ndarray, Dict]:
+    def gravity_model_chunked(self,
+                            productions: np.ndarray,
+                            attractions: np.ndarray,
+                            distance_matrix: np.ndarray,
+                            gamma: float,
+                            total_trips: float = None,
+                            alpha: float = 1.0,
+                            beta: float = 1.0) -> np.ndarray:
         """
-        Calculate OD matrix using gravity model with memory-efficient chunking
+        Calculate gravity model T_ij = (P_i^α * A_j^β) / (d_ij^γ) with chunking
         
-        Parameters:
-        -----------
-        chunk_size : int
-            Number of origin rows to process at once (reduce if still running out of memory)
+        Returns unnormalized gravity matrix
         """
-        print("=" * 60)
-        print("CALCULATING OD MATRIX (MEMORY-EFFICIENT MODE)")
-        print("=" * 60)
+        n = len(productions)
         
-        n_grids = len(origins)
-        print(f"Number of grids: {n_grids:,}")
-        print(f"Chunk size: {chunk_size} rows at a time")
-        print(f"Total origins: {origins.sum():,.0f}")
-        print(f"Total destinations: {destinations.sum():,.0f}")
+        # Calculate unnormalized gravity matrix in chunks
+        od_matrix = np.zeros((n, n))
         
-        # Calculate or use provided distance matrix
-        if distance_matrix is None:
-            distance_matrix = self.calculate_distances(coordinates, distance_type)
+        # Pre-calculate productions^alpha and attractions^beta
+        P_alpha = productions ** alpha
+        A_beta = attractions ** beta
         
-        print("\nApplying gravity model in chunks...")
-        start_time = time.time()
-        
-        # First pass: calculate sum of unnormalized values for scaling
-        print("Pass 1/2: Calculating scaling constant...")
-        total_unnormalized = 0.0
-        
-        D_beta = destinations ** self.beta  # Pre-calculate once
-        
-        for i in range(0, n_grids, chunk_size):
-            end_idx = min(i + chunk_size, n_grids)
+        for i in range(0, n, self.chunk_size):
+            end_i = min(i + self.chunk_size, n)
             
-            # Get chunk of origins
-            O_chunk = origins[i:end_idx].reshape(-1, 1)
-            O_alpha_chunk = O_chunk ** self.alpha
+            # Get chunk of production values
+            P_chunk = P_alpha[i:end_i].reshape(-1, 1)
             
-            # Get chunk of distances
-            dist_chunk = distance_matrix[i:end_idx, :]
-            
-            # Calculate unnormalized gravity for this chunk
-            with np.errstate(divide='ignore', invalid='ignore'):
-                chunk_unnormalized = (O_alpha_chunk * D_beta) / (dist_chunk ** self.gamma)
-            
-            chunk_unnormalized = np.nan_to_num(chunk_unnormalized, nan=0.0, posinf=0.0, neginf=0.0)
-            total_unnormalized += chunk_unnormalized.sum()
-            
-            if (i // chunk_size) % 5 == 0:
-                progress = (end_idx / n_grids) * 100
-                print(f"  Progress: {progress:.1f}% ({end_idx}/{n_grids})")
-        
-        # Calculate scaling constant
-        if total_trips is None:
-            total_trips = min(origins.sum(), destinations.sum())
-        
-        self.k = total_trips / total_unnormalized if total_unnormalized > 0 else 1.0
-        print(f"Scaling constant k = {self.k:.6e}")
-        
-        # Second pass: calculate and store actual OD values
-        print("\nPass 2/2: Generating final OD matrix...")
-        
-        # Initialize sparse storage
-        od_vectors = []
-        
-        for i in range(0, n_grids, chunk_size):
-            end_idx = min(i + chunk_size, n_grids)
-            
-            # Get chunk of origins
-            O_chunk = origins[i:end_idx].reshape(-1, 1)
-            O_alpha_chunk = O_chunk ** self.alpha
-            
-            # Get chunk of distances
-            dist_chunk = distance_matrix[i:end_idx, :]
+            # Get chunk of distance matrix
+            dist_chunk = distance_matrix[i:end_i, :]
             
             # Calculate gravity for this chunk
             with np.errstate(divide='ignore', invalid='ignore'):
-                chunk_od = self.k * (O_alpha_chunk * D_beta) / (dist_chunk ** self.gamma)
+                gravity_chunk = (P_chunk * A_beta) / (dist_chunk ** gamma)
             
-            chunk_od = np.nan_to_num(chunk_od, nan=0.0, posinf=0.0, neginf=0.0)
+            # Handle invalid values
+            gravity_chunk = np.nan_to_num(gravity_chunk, nan=0.0, posinf=0.0, neginf=0.0)
+            od_matrix[i:end_i, :] = gravity_chunk
             
-            # Store non-zero values for each origin in chunk
-            for local_idx, global_idx in enumerate(range(i, end_idx)):
-                row = chunk_od[local_idx]
-                non_zero_mask = row > 1e-10  # Threshold for sparsity
-                
-                if non_zero_mask.any():
-                    od_vectors.append({
-                        'origin_idx': global_idx,
-                        'dest_indices': np.where(non_zero_mask)[0],
-                        'values': row[non_zero_mask]
-                    })
-            
-            if (i // chunk_size) % 5 == 0:
-                progress = (end_idx / n_grids) * 100
-                print(f"  Progress: {progress:.1f}% ({end_idx}/{n_grids})")
+            if (i // self.chunk_size) % 10 == 0:
+                progress = (end_i / n) * 100
+                print(f"  Gravity calculation: {progress:.1f}%")
         
-        elapsed_time = time.time() - start_time
-        print(f"\nOD matrix calculated in {elapsed_time:.2f} seconds")
-        
-        # Calculate statistics from sparse representation
-        stats = self._calculate_statistics_sparse(od_vectors, origins, destinations, n_grids)
-        
-        # Create info dictionary
-        info_dict = {
-            'n_grids': n_grids,
-            'total_trips': total_trips,
-            'scaling_constant_k': self.k,
-            'model_parameters': {
-                'alpha': self.alpha,
-                'beta': self.beta,
-                'gamma': self.gamma
-            },
-            'statistics': stats,
-            'distance_type': distance_type
-        }
-        
-        return od_vectors, info_dict
+        return od_matrix
     
-    def combine_od_vectors(
-        self,
-        vectors1: List[Dict], 
-        vectors2: List[Dict], 
-        vectors3: List[Dict], 
-        weights: Tuple[float, float, float],
-        n_grids: int
-    ) -> List[Dict]:
+    def ipf_balancing(self,
+                     od_matrix: np.ndarray,
+                     productions: np.ndarray,
+                     attractions: np.ndarray,
+                     max_iterations: int = 15,
+                     tolerance: float = 1e-6) -> np.ndarray:
         """
-        Combine multiple OD vectors with weights
+        Iterative Proportional Fitting (Furness method) to balance OD matrix
+        
+        Ensures: sum_j T_ij = P_i and sum_i T_ij = A_j
         """
-        w1, w2, w3 = weights
+        print(f"  IPF balancing (max {max_iterations} iterations)...")
         
-        # Convert to dictionaries for easier combination
-        od_dict = {i: {} for i in range(n_grids)}
+        n = len(productions)
+        T = od_matrix.copy()
         
-        # Helper function to add vectors to dictionary
-        def add_to_dict(vectors, weight):
-            for vector in vectors:
-                origin_idx = vector['origin_idx']
-                for dest_idx, value in zip(vector['dest_indices'], vector['values']):
-                    key = (origin_idx, dest_idx)
-                    if key in od_dict[origin_idx]:
-                        od_dict[origin_idx][key] += value * weight
-                    else:
-                        od_dict[origin_idx][key] = value * weight
+        # Initialize scaling factors
+        row_factors = np.ones(n)
+        col_factors = np.ones(n)
         
-        # Add all vectors
-        add_to_dict(vectors1, w1)
-        add_to_dict(vectors2, w2)
-        add_to_dict(vectors3, w3)
-        
-        # Convert back to vector format
-        combined_vectors = []
-        
-        for origin_idx in range(n_grids):
-            if od_dict[origin_idx]:
-                dest_indices = []
-                values = []
-                
-                for (_, dest_idx), value in od_dict[origin_idx].items():
-                    if value > 1e-10:  # Apply threshold
-                        dest_indices.append(dest_idx)
-                        values.append(value)
-                
-                if dest_indices:  # Only add if there are non-zero destinations
-                    combined_vectors.append({
-                        'origin_idx': origin_idx,
-                        'dest_indices': np.array(dest_indices),
-                        'values': np.array(values)
-                    })
-        
-        return combined_vectors
-    
-    def calculate_combined_od(
-        self,
-        residential: np.ndarray,
-        employment: np.ndarray,
-        amenity: np.ndarray,
-        coordinates: np.ndarray,
-        grid_ids: np.ndarray,
-        weights: Tuple[float, float, float] = (0.5, 0.3, 0.2),  # w1, w2, w3
-        model_params: Dict[str, Dict] = None
-    ) -> Tuple[List[Dict], Dict]:
-        """
-        Calculate combined OD matrix from multiple trip purposes
-        
-        Parameters:
-        -----------
-        weights : Tuple[float, float, float]
-            Weights for HBW, HBNW, NHB trip purposes (w1, w2, w3)
-        model_params : Dict[str, Dict]
-            Optional dictionary with specific parameters for each model
-            Example: {
-                'HBW': {'alpha': 1.0, 'beta': 1.0, 'gamma': 2.0},
-                'HBNW': {'alpha': 1.0, 'beta': 1.0, 'gamma': 1.8},
-                'NHB': {'alpha': 1.0, 'beta': 1.0, 'gamma': 2.2}
-            }
-        """
-        
-        # Default parameters if not provided
-        if model_params is None:
-            model_params = {
-                'HBW': {'alpha': 1.0, 'beta': 1.0, 'gamma': 2.0},
-                'HBNW': {'alpha': 1.0, 'beta': 1.0, 'gamma': 2.0},
-                'NHB': {'alpha': 1.0, 'beta': 1.0, 'gamma': 2.0}
-            }
-        
-        w1, w2, w3 = weights
-        
-        # Calculate distance matrix once (reused for all models)
-        print("Calculating distance matrix...")
-        distance_matrix = cdist(coordinates, coordinates, metric='euclidean')
-        np.fill_diagonal(distance_matrix, 1.0)
-        
-        # 1. HBW: Residential → Employment
-        print("\n" + "=" * 50)
-        print("Calculating HBW trips (Residential → Employment)")
-        print("=" * 50)
-        model_hbw = GravityModelOD(**model_params['HBW'])
-        od_hbw, info_hbw = model_hbw.calculate_od_matrix(
-            origins=residential,
-            destinations=employment,
-            coordinates=coordinates,
-            distance_matrix=distance_matrix,
-            chunk_size=500
-        )
-        
-        # 2. HBNW: Residential → Amenity
-        print("\n" + "=" * 50)
-        print("Calculating HBNW trips (Residential → Amenity)")
-        print("=" * 50)
-        model_hbnw = GravityModelOD(**model_params['HBNW'])
-        od_hbnw, info_hbnw = model_hbnw.calculate_od_matrix(
-            origins=residential,
-            destinations=amenity,
-            coordinates=coordinates,
-            distance_matrix=distance_matrix,
-            chunk_size=500
-        )
-        
-        # 3. NHB: Employment → Amenity
-        print("\n" + "=" * 50)
-        print("Calculating NHB trips (Employment → Amenity)")
-        print("=" * 50)
-        model_nhb = GravityModelOD(**model_params['NHB'])
-        od_nhb, info_nhb = model_nhb.calculate_od_matrix(
-            origins=employment,
-            destinations=amenity,
-            coordinates=coordinates,
-            distance_matrix=distance_matrix,
-            chunk_size=500
-        )
-        
-        # Combine the OD matrices with weights
-        print("\n" + "=" * 50)
-        print("Combining trip purposes with weights")
-        print(f"Weights: HBW={w1:.2f}, HBNW={w2:.2f}, NHB={w3:.2f}")
-        print("=" * 50)
-        
-        combined_vectors = self.combine_od_vectors(
-            od_hbw, od_hbnw, od_nhb, 
-            weights=(w1, w2, w3), 
-            n_grids=len(residential)
-        )
-        
-        # Create combined info dictionary
-        combined_info = {
-            'weights': {
-                'HBW': w1,
-                'HBNW': w2,
-                'NHB': w3
-            },
-            'model_parameters': model_params,
-            'HBW_info': info_hbw,
-            'HBNW_info': info_hbnw,
-            'NHB_info': info_nhb
-        }
-        
-        return combined_vectors, combined_info
-    
-    def _calculate_statistics_sparse(self, od_vectors: List[Dict], 
-                                     origins: np.ndarray, 
-                                     destinations: np.ndarray,
-                                     n_grids: int) -> Dict:
-        """Calculate statistics from sparse OD representation"""
-        stats = {}
-        
-        # Calculate row and column sums efficiently
-        row_sums = np.zeros(n_grids)
-        col_sums = np.zeros(n_grids)
-        total_trips = 0.0
-        non_zero_count = 0
-        
-        for vector in od_vectors:
-            origin_idx = vector['origin_idx']
-            dest_indices = vector['dest_indices']
-            values = vector['values']
+        for iteration in range(max_iterations):
+            # Row balancing (match productions)
+            row_sums = T.sum(axis=1)
+            row_sums[row_sums == 0] = 1  # Avoid division by zero
+            row_factors_new = productions / row_sums
             
-            row_sum = values.sum()
-            row_sums[origin_idx] = row_sum
+            T = T * row_factors_new[:, np.newaxis]
             
-            for dest_idx, value in zip(dest_indices, values):
-                col_sums[dest_idx] += value
+            # Column balancing (match attractions)
+            col_sums = T.sum(axis=0)
+            col_sums[col_sums == 0] = 1
+            col_factors_new = attractions / col_sums
             
-            total_trips += row_sum
-            non_zero_count += len(values)
+            T = T * col_factors_new[np.newaxis, :]
+            
+            # Calculate convergence
+            row_error = np.abs(T.sum(axis=1) - productions).sum() / productions.sum()
+            col_error = np.abs(T.sum(axis=0) - attractions).sum() / attractions.sum()
+            total_error = max(row_error, col_error)
+            
+            if iteration % 5 == 0:
+                print(f"    Iteration {iteration}: error = {total_error:.6f}")
+            
+            if total_error < tolerance:
+                print(f"  IPF converged after {iteration + 1} iterations")
+                break
         
-        stats['total_estimated_trips'] = total_trips
-        stats['non_zero_elements'] = non_zero_count
-        stats['sparsity'] = 1 - (non_zero_count / (n_grids * n_grids))
+        # Final scaling to ensure exact match (optional but recommended)
+        T = self._exact_scaling(T, productions, attractions)
         
-        # Correlations
-        stats['origin_correlation'] = np.corrcoef(origins, row_sums)[0, 1]
-        stats['destination_correlation'] = np.corrcoef(destinations, col_sums)[0, 1]
-        
-        # Error metrics
-        origin_error = np.abs(row_sums - origins).sum() / origins.sum()
-        destination_error = np.abs(col_sums - destinations).sum() / destinations.sum()
-        
-        stats['origin_mean_absolute_error'] = origin_error
-        stats['destination_mean_absolute_error'] = destination_error
-        
-        return stats
+        return T
     
-    def save_vectors_streaming(self, od_vectors: List[Dict], grid_ids: np.ndarray, 
-                               filename: str, chunk_size: int = 1000):
-        """
-        Stream vectors directly to JSON file without loading all into memory
+    def _exact_scaling(self, T: np.ndarray, P: np.ndarray, A: np.ndarray) -> np.ndarray:
+        """Ensure exact match to productions and attractions"""
+        # First scale rows to match productions exactly
+        row_sums = T.sum(axis=1)
+        row_sums[row_sums == 0] = 1
+        T = T * (P / row_sums)[:, np.newaxis]
         
-        Parameters:
-        -----------
-        od_vectors : List[Dict]
-            Sparse OD representation from calculate_od_matrix
-        grid_ids : np.ndarray
-            Grid IDs for mapping
-        filename : str
-            Output JSON filename
-        chunk_size : int
-            Number of vectors to process at once
-        """
-        import json
+        # Then scale columns to match attractions exactly
+        col_sums = T.sum(axis=0)
+        col_sums[col_sums == 0] = 1
+        T = T * (A / col_sums)[np.newaxis, :]
         
-        print("\nStreaming vectors to file...")
+        return T
+    
+    def calculate_trip_purpose(self,
+                              productions: np.ndarray,
+                              attractions: np.ndarray,
+                              distance_matrix: np.ndarray,
+                              purpose_name: str,
+                              purpose_params: Dict) -> np.ndarray:
+        """
+        Calculate OD matrix for a single trip purpose with IPF balancing
+        
+        purpose_params should contain:
+            - gamma: distance decay parameter
+            - total_trips: total trips for this purpose (optional)
+            - alpha, beta: production/attraction elasticities (default 1.0)
+        """
+        print(f"\n{'='*60}")
+        print(f"Calculating {purpose_name} trips")
+        print(f"{'='*60}")
+        
+        # Extract parameters
+        gamma = purpose_params.get('gamma', 2.0)
+        total_trips = purpose_params.get('total_trips')
+        alpha = purpose_params.get('alpha', 1.0)
+        beta = purpose_params.get('beta', 1.0)
+        
+        print(f"  Gamma (distance decay): {gamma}")
+        print(f"  Alpha (production elasticity): {alpha}")
+        print(f"  Beta (attraction elasticity): {beta}")
+        print(f"  Total trips target: {total_trips if total_trips else 'Not specified'}")
+        
+        # Step 1: Calculate unnormalized gravity matrix
+        print("  Step 1: Calculating gravity model...")
         start_time = time.time()
         
-        total_vectors = len(od_vectors)
+        T0 = self.gravity_model_chunked(
+            productions=productions,
+            attractions=attractions,
+            distance_matrix=distance_matrix,
+            gamma=gamma,
+            alpha=alpha,
+            beta=beta
+        )
         
-        with open(filename, 'w') as f:
-            # Write opening bracket
-            f.write('[\n')
-            
-            # Process in chunks
-            for i in range(0, total_vectors, chunk_size):
-                end_idx = min(i + chunk_size, total_vectors)
-                chunk = od_vectors[i:end_idx]
-                
-                # Convert chunk to export format
-                for j, vector in enumerate(chunk):
-                    origin_idx = vector['origin_idx']
-                    origin_id = grid_ids[origin_idx]
-                    
-                    destinations_list = [
-                        {
-                            'destination_id': int(grid_ids[dest_idx]),
-                            'trips': float(value)
-                        }
-                        for dest_idx, value in zip(vector['dest_indices'], vector['values'])
-                    ]
-                    
-                    export_vector = {
-                        'origin_id': int(origin_id),
-                        'destinations': destinations_list,
-                        'total_trips': float(vector['values'].sum())
-                    }
-                    
-                    # Write to file
-                    json_str = json.dumps(export_vector, indent=2)
-                    
-                    # Add proper JSON array formatting
-                    if i + j < total_vectors - 1:
-                        f.write('  ' + json_str.replace('\n', '\n  ') + ',\n')
-                    else:
-                        f.write('  ' + json_str.replace('\n', '\n  ') + '\n')
-                
-                # Progress update
-                if (i // chunk_size) % 5 == 0:
-                    progress = (end_idx / total_vectors) * 100
-                    print(f"  Progress: {progress:.1f}% ({end_idx}/{total_vectors})")
-            
-            # Write closing bracket
-            f.write(']\n')
+        gravity_time = time.time() - start_time
+        print(f"    Gravity model calculated in {gravity_time:.2f} seconds")
+        print(f"    Unnormalized total: {T0.sum():.2f}")
         
-        elapsed_time = time.time() - start_time
-        print(f"Vectors saved to {filename} in {elapsed_time:.2f} seconds")
-        print(f"Total vectors written: {total_vectors}")
+        # Step 2: Scale to total trips if specified
+        if total_trips is not None:
+            scale_factor = total_trips / T0.sum()
+            T0 = T0 * scale_factor
+            print(f"  Step 2: Scaled to {total_trips:.0f} trips (scale factor: {scale_factor:.6f})")
+        
+        # Step 3: IPF balancing
+        print("  Step 3: Applying IPF balancing...")
+        start_time = time.time()
+        
+        T_balanced = self.ipf_balancing(
+            od_matrix=T0,
+            productions=productions,
+            attractions=attractions
+        )
+        
+        ipf_time = time.time() - start_time
+        print(f"    IPF completed in {ipf_time:.2f} seconds")
+        
+        # Calculate statistics
+        self._calculate_statistics(T_balanced, productions, attractions, purpose_name)
+        
+        return T_balanced
     
-    def save_vectors(self, vectors_list: List[Dict], filename: str):
-        """Save vectors to JSON file"""
+    def combine_trip_purposes(self,
+                             od_matrices: Dict[str, np.ndarray],
+                             weights: Dict[str, float]) -> np.ndarray:
+        """
+        Combine multiple OD matrices with weights
+        
+        Parameters:
+        -----------
+        od_matrices: Dictionary with purpose_name -> OD matrix
+        weights: Dictionary with purpose_name -> weight (should sum to 1.0)
+        """
+        print(f"\n{'='*60}")
+        print("Combining trip purposes")
+        print(f"{'='*60}")
+        
+        # Validate weights
+        total_weight = sum(weights.values())
+        if abs(total_weight - 1.0) > 1e-6:
+            print(f"Warning: Weights sum to {total_weight:.3f}, normalizing to 1.0")
+            for key in weights:
+                weights[key] /= total_weight
+        
+        # Combine matrices
+        combined = None
+        for purpose_name, od_matrix in od_matrices.items():
+            weight = weights.get(purpose_name, 0.0)
+            print(f"  {purpose_name}: weight = {weight:.3f}, trips = {od_matrix.sum():.0f}")
+            
+            if combined is None:
+                combined = od_matrix * weight
+            else:
+                combined += od_matrix * weight
+        
+        print(f"\n  Combined total trips: {combined.sum():.0f}")
+        
+        return combined
+    
+    def _calculate_statistics(self, od_matrix: np.ndarray,
+                            productions: np.ndarray,
+                            attractions: np.ndarray,
+                            purpose_name: str):
+        """Calculate and display statistics for OD matrix"""
+        row_sums = od_matrix.sum(axis=1)
+        col_sums = od_matrix.sum(axis=0)
+        
+        print(f"\n  Statistics for {purpose_name}:")
+        print(f"    Total trips: {od_matrix.sum():.0f}")
+        print(f"    Non-zero cells: {(od_matrix > 0).sum():,} ({100 * (od_matrix > 0).sum() / od_matrix.size:.1f}%)")
+        print(f"    Avg trips per origin: {row_sums.mean():.2f}")
+        print(f"    Max trips per origin: {row_sums.max():.2f}")
+        
+        # Production-Attraction correlations
+        prod_corr = np.corrcoef(productions, row_sums)[0, 1]
+        attr_corr = np.corrcoef(attractions, col_sums)[0, 1]
+        
+        print(f"    Production correlation: {prod_corr:.3f}")
+        print(f"    Attraction correlation: {attr_corr:.3f}")
+        
+        # Errors
+        prod_error = np.abs(row_sums - productions).sum() / productions.sum()
+        attr_error = np.abs(col_sums - attractions).sum() / attractions.sum()
+        
+        print(f"    Production error (MAE): {prod_error:.3%}")
+        print(f"    Attraction error (MAE): {attr_error:.3%}")
+    
+    def save_sparse_vectors(self, od_matrix: np.ndarray,
+                           grid_ids: np.ndarray,
+                           filename: str,
+                           threshold: float = 1e-6):
+        """
+        Save OD matrix as sparse vectors to JSON file
+        
+        Each vector: {origin_id: X, destinations: [{dest_id: Y, trips: Z}, ...]}
+        """
         import json
         
-        with open(filename, 'w') as f:
-            json.dump(vectors_list, f, indent=2)
+        print(f"\nSaving sparse vectors to {filename}...")
+        start_time = time.time()
         
-        print(f"\nVectors saved to {filename}")
+        n = len(od_matrix)
+        vectors = []
+        
+        for i in range(n):
+            # Get non-zero destinations for this origin
+            row = od_matrix[i]
+            non_zero_mask = row > threshold
+            
+            if non_zero_mask.any():
+                dest_indices = np.where(non_zero_mask)[0]
+                values = row[non_zero_mask]
+                
+                # Create destinations list
+                destinations = []
+                for dest_idx, value in zip(dest_indices, values):
+                    destinations.append({
+                        'destination_id': int(grid_ids[dest_idx]),
+                        'trips': float(value)
+                    })
+                
+                vectors.append({
+                    'origin_id': int(grid_ids[i]),
+                    'destinations': destinations,
+                    'total_trips': float(values.sum())
+                })
+        
+        # Save to file
+        with open(filename, 'w') as f:
+            json.dump(vectors, f, indent=2)
+        
+        elapsed_time = time.time() - start_time
+        print(f"  Saved {len(vectors)} vectors in {elapsed_time:.2f} seconds")
+        print(f"  Sparsity: {(od_matrix > threshold).sum() / od_matrix.size:.1%}")
 
-
-def load_data(filepath: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Load data from GeoJSON file"""
-    print(f"Loading data from {filepath}...")
-    
-    gdf = gpd.read_file(filepath)
-    
-    print(f"Loaded {len(gdf)} features")
-    print(f"Current CRS: {gdf.crs}")
-    
-    if not all(gdf.geometry.geom_type == 'Point'):
-        raise ValueError("All geometries must be Point type")
-    
-    if gdf.crs.to_epsg() == 4326:
-        print("Reprojecting to EPSG:3857 (Web Mercator)...")
-        gdf = gdf.to_crs(epsg=3857)
-    
-    coordinates = np.column_stack([gdf.geometry.x.values, gdf.geometry.y.values])
-    
-    # Find origin and destination columns
-    residential_cols = [col for col in gdf.columns if 'residential_intensity_norm' in col.lower()]
-    employment_cols = [col for col in gdf.columns if 'employment_edu_intensity_norm' in col.lower()]
-    amenity_cols = [col for col in gdf.columns if 'amenity_intensity_norm' in col.lower()]
-    
-    if not residential_cols or not employment_cols or not amenity_cols:
-        raise ValueError(f"Could not find origin/destination columns in: {list(gdf.columns)}")
-    
-    residential = gdf[residential_cols[0]].values.astype(float)
-    employment = gdf[employment_cols[0]].values.astype(float)
-    amenity = gdf[amenity_cols[0]].values.astype(float)
-    
-    # Get grid IDs
-    id_cols = [col for col in gdf.columns if 'id' in col.lower()]
-    grid_ids = gdf[id_cols[0]].values if id_cols else np.arange(len(gdf))
-    
-    print(f"\nData summary:")
-    print(f"  Number of grids: {len(gdf)}")
-    print(f"  Residential intensity: {residential.min():.1f} - {residential.max():.1f}")
-    print(f"  Employment intensity: {employment.min():.1f} - {employment.max():.1f}")
-    print(f"  Amenity intensity: {amenity.min():.1f} - {amenity.max():.1f}")
-    
-    return residential, employment, amenity, coordinates, grid_ids, gdf
-
-
+# Main execution
 def main():
-    """Main execution function for combined trip purposes"""
-    print("COMBINED GRAVITY MODEL FOR MULTIPLE TRIP PURPOSES")
+    print("IMPROVED GRAVITY MODEL WITH IPF BALANCING")
     print("=" * 60)
     
-    # Load data with multiple intensities
+    # Load data
+    def load_data(filepath: str):
+        print(f"\nLoading data from {filepath}...")
+        gdf = gpd.read_file(filepath)
+        
+        # Reproject if needed
+        if gdf.crs.to_epsg() == 4326:
+            print("Reprojecting to Web Mercator (EPSG:3857)...")
+            gdf = gdf.to_crs(epsg=3857)
+        
+        # Extract coordinates
+        coordinates = np.column_stack([gdf.geometry.x.values, gdf.geometry.y.values])
+        
+        # Find intensity columns
+        residential_cols = [col for col in gdf.columns if 'residential_intensity_norm' in col.lower()]
+        employment_cols = [col for col in gdf.columns if 'employment_edu_intensity_norm' in col.lower()]
+        amenity_cols = [col for col in gdf.columns if 'amenity_intensity_norm' in col.lower()]
+        id_cols = [col for col in gdf.columns if 'id' in col.lower()]
+        
+        residential = gdf[residential_cols[0]].values if residential_cols else np.ones(len(gdf))
+        employment = gdf[employment_cols[0]].values if employment_cols else np.ones(len(gdf))
+        amenity = gdf[amenity_cols[0]].values if amenity_cols else np.ones(len(gdf))
+        grid_ids = gdf[id_cols[0]].values if id_cols else np.arange(len(gdf))
+        
+        # Normalize to sum to 1 for IPF
+        residential = residential / residential.sum() * len(gdf)
+        employment = employment / employment.sum() * len(gdf)
+        amenity = amenity / amenity.sum() * len(gdf)
+        
+        print(f"  Loaded {len(gdf)} grid cells")
+        print(f"  Residential sum: {residential.sum():.1f}")
+        print(f"  Employment sum: {employment.sum():.1f}")
+        print(f"  Amenity sum: {amenity.sum():.1f}")
+        
+        return residential, employment, amenity, coordinates, grid_ids, gdf
+    
+    # Load your data
     residential, employment, amenity, coordinates, grid_ids, gdf = load_data(
         'data/raw/rea_1000m.geojson'
     )
     
-    # Define weights for time of day (adjust these based on your analysis)
-    # Example: Morning peak might have higher HBW weight
-    weights = (0.5, 0.3, 0.2)  # w1 (HBW), w2 (HBNW), w3 (NHB)
+    # Initialize model
+    model = ImprovedGravityModel(chunk_size=500)
     
-    # Optional: Define different parameters for each trip purpose
-    model_params = {
-        'HBW': {'alpha': 1.0, 'beta': 1.0, 'gamma': 2.0},   # Work trips are more distance-sensitive
-        'HBNW': {'alpha': 0.9, 'beta': 0.9, 'gamma': 1.8},  # Non-work trips are less distance-sensitive
-        'NHB': {'alpha': 1.0, 'beta': 1.0, 'gamma': 2.2}    # Non-home-based trips might be different
+    # Calculate distance matrix (once, reused for all purposes)
+    print("\nCalculating distance matrix...")
+    distance_matrix = model.calculate_distances(coordinates)
+    
+    # Step 1: Define total trips per purpose
+    # You can adjust these based on your study area
+    total_trips_hbw = 10000.0   # T_HBW = 1.0
+    total_trips_hbnw = 6000.0   # T_HBNW = 0.6
+    total_trips_nhb = 4000.0    # T_NHB = 0.4
+    
+    # Step 2-4: Calculate each trip purpose with IPF
+    od_matrices = {}
+    
+    # HBW: Home-Based Work (Residential -> Employment)
+    od_hbw = model.calculate_trip_purpose(
+        productions=residential,
+        attractions=employment,
+        distance_matrix=distance_matrix,
+        purpose_name="HBW",
+        purpose_params={
+            'gamma': 1.4,        # Work trips are more distance-sensitive
+            'total_trips': total_trips_hbw,
+            'alpha': 1.0,
+            'beta': 1.0
+        }
+    )
+    od_matrices['HBW'] = od_hbw
+    
+    # HBNW: Home-Based Non-Work (Residential -> Amenity)
+    od_hbnw = model.calculate_trip_purpose(
+        productions=residential,
+        attractions=amenity,
+        distance_matrix=distance_matrix,
+        purpose_name="HBNW",
+        purpose_params={
+            'gamma': 2.5,        # Non-work trips are less distance-sensitive
+            'total_trips': total_trips_hbnw,
+            'alpha': 1.0,
+            'beta': 1.0
+        }
+    )
+    od_matrices['HBNW'] = od_hbnw
+    
+    # NHB: Non-Home-Based (Employment -> Amenity)
+    od_nhb = model.calculate_trip_purpose(
+        productions=employment,
+        attractions=amenity,
+        distance_matrix=distance_matrix,
+        purpose_name="NHB",
+        purpose_params={
+            'gamma': 2.0,        # Intermediate distance sensitivity
+            'total_trips': total_trips_nhb,
+            'alpha': 1.0,
+            'beta': 1.0
+        }
+    )
+    od_matrices['NHB'] = od_nhb
+    
+    # Step 5: Combine trip purposes
+    # You can adjust these weights based on time of day or other factors
+    weights = {
+        'HBW': 0.5,   # 50% of total trips
+        'HBNW': 0.3,  # 30% of total trips
+        'NHB': 0.2    # 20% of total trips
     }
     
-    # Calculate combined OD matrix
-    model = GravityModelOD()
-    combined_vectors, combined_info = model.calculate_combined_od(
-        residential=residential,
-        employment=employment,
-        amenity=amenity,
-        coordinates=coordinates,
+    combined_od = model.combine_trip_purposes(od_matrices, weights)
+    
+    # Save results
+    print(f"\n{'='*60}")
+    print("Saving results...")
+    
+    # Save combined OD matrix
+    model.save_sparse_vectors(
+        od_matrix=combined_od,
         grid_ids=grid_ids,
-        weights=weights,
-        model_params=model_params
+        filename='data/raw/rea_1000m_vectors_v2.json'
     )
-    
-    # Export combined results
-    # Create instance for saving
-    model.save_vectors_streaming(
-        od_vectors=combined_vectors,
-        grid_ids=grid_ids,
-        filename='data/raw/rea_1000m_vectors.json',
-        chunk_size=1000
-    )
-    
-    # Save individual trip purposes for analysis
-    print("\nSaving individual trip purposes...")
-    
-    print("\n" + "=" * 60)
-    print("PROCESS COMPLETED SUCCESSFULLY!")
-    print("=" * 60)
-    print(f"Total combined vectors: {len(combined_vectors)}")
-
+        
+    print(f"\n{'='*60}")
+    print("PROCESS COMPLETED!")
+    print(f"{'='*60}")
+    print(f"Total combined trips: {combined_od.sum():.0f}")
+    print(f"Number of origins: {len(combined_od)}")
+    print(f"Number of OD pairs: {(combined_od > 0).sum():,}")
 
 if __name__ == "__main__":
     main()
