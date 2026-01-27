@@ -171,6 +171,9 @@ def enhanced_origin_analysis():
         # Get amenity features from OSM
         gdf_amenity = ox.features_from_place(place, amenity_tags)
         gdf_amenity = gdf_amenity.to_crs(grid.crs)
+
+        incorrect_park_bounds = box(410295.29, 9148048.26, 412765.03, 9149655.77) # daerah tinalah di kulonprogo, gtw kok ada 'park' gede bat
+        gdf_amenity = gdf_amenity[~gdf_amenity.geometry.intersects(incorrect_park_bounds)]
         
         # Calculate amenity intensity per grid cell
         amenity_scores = np.zeros(len(grid))
@@ -202,7 +205,7 @@ def enhanced_origin_analysis():
         
         # MANUAL ADDITION: Malioboro Street area (famous shopping/tourist area in Yogyakarta)
         # Approximate coordinates for Malioboro area
-        malioboro_bounds = box(440000, 9125000, 442000, 9127000)  # Adjust based on your CRS
+        malioboro_bounds = box(429798, 9137207, 430309, 9139673)  # Adjust based on your CRS
         malioboro_bounds = malioboro_bounds  # Ensure same CRS
         
         # Find cells in Malioboro area
@@ -213,7 +216,7 @@ def enhanced_origin_analysis():
             intersection = grid.loc[cell_idx, 'geometry'].intersection(malioboro_bounds)
             if hasattr(intersection, 'area') and intersection.area > 0:
                 weight = intersection.area / grid.loc[cell_idx, 'geometry'].area
-                amenity_scores[cell_idx] += 10 * weight  # Significant bonus
+                amenity_scores[cell_idx] += 7 * weight  # Significant bonus
         
         grid['amenity_intensity'] = amenity_scores
         

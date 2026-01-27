@@ -276,7 +276,8 @@ class VectorRouter:
                     "v": v,
                     "flow": flow,
                     "length_m": edge.get("length", 0),
-                    "highway": edge.get("highway", None)
+                    "highway": edge.get("highway", None),
+                    "name": edge.get("name", None)
                 },
                 "geometry": geom.__geo_interface__
             })
@@ -322,8 +323,6 @@ class VectorRouter:
         return False
 
 
-
-
 def main():
     router = VectorRouter("Yogyakarta, Indonesia", cache_dir="./osm_cache")
     
@@ -333,14 +332,14 @@ def main():
     # Load data
     router.load_data(
         points_file="data/raw/rea_1000m.geojson",
-        vectors_file="data/raw/rea_1000m_vectors.json"
+        vectors_file="data/raw/rea_1000m_vectors_v2.json"
     )
 
     # Pre-snap all points to nearest nodes
     router.precompute_nearest_nodes()
     
     # Process all vectors
-    router.process_all(output_file='data/raw/rea_1000m_edge_flows.geojson')
+    router.process_all(output_file='data/raw/rea_1000m_edge_flows_v2.geojson')
     
     logger.info("Complete!")
 
