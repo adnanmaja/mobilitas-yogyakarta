@@ -6,6 +6,7 @@ import osmnx as ox
 import os
 import pickle
 import math
+from vector_routing_v2 import VectorRouter
 
 # Road-type capacity coefficients (relative capacity per unit length)
 CAPACITY_COEFF_BY_TYPE = {
@@ -35,8 +36,11 @@ UTILIZATION_FACTOR_DEFAULT = 0.7  # fallback for unknown types
 
 NOISE = 0.05       # ±5% flow noise
 R_MAX = 1.3        # clamp ratio
-ALPHA = 0.15
-BETA = 2
+ALPHA = 0.15        # BPR    
+BETA = 2           # BPR 
+ITERATIONS = 5  # Number of feedback loop iterations
+REASSIGN_METHOD = "proportional"  # "proportional" or "all-or-nothing"
+CONVERGENCE_THRESHOLD = 0.01  # 1% change threshold
 
 input_path = "data/raw/rea_1000m_edge_flows_v2.geojson"
 output_path = "data/raw/rea_1000m_congestions_v2.geojson"
@@ -65,10 +69,6 @@ def bin_bearing(bearing, bin_size=45):
     """
     if bearing is None:
         return 0
-    # bearing = bearing % 360
-    # bin_id = int((bearing + bin_size/2) // bin_size) * bin_size
-    # bin_id %= 360
-    # bin_id = bin_id % 180
     
     return int(bearing // bin_size) * bin_size
 
@@ -130,88 +130,237 @@ def calculate_edge_bearing(feature):
     
     return calculate_bearing(lon1, lat1, lon2, lat2)
 
+def update_travel_times(features, congestion_values):
+    """
+    Update edge travel times based on congestion using BPR formula.
+    Returns new travel times and a mapping of edge_id -> new_time.
+    """
+    edge_times = {}
+    
+    for i, feature in enumerate(features):
+        props = feature["properties"]
+        
+        # Get original travel time (if exists) or compute from length and speed
+        if "time_original" not in props:
+            # Estimate original time: length / speed
+            length_m = props.get("length_m", 100.0)
+            # Assume speed based on road type
+            highway_type = props.get("highway")
+            if isinstance(highway_type, list):
+                highway_type = highway_type[0] if highway_type else "residential"
+            
+            # Simple speed estimates (km/h)
+            speed_map = {
+                "trunk": 70,
+                "primary": 50,
+                "secondary": 40,
+                "tertiary": 30,
+                "residential": 20,
+                "living_street": 10,
+                "unclassified": 30,
+                "service": 15,
+            }
+            speed_kph = speed_map.get(highway_type, 30)
+            speed_mps = speed_kph / 3.6  # Convert to m/s
+            
+            # Original time in seconds
+            time_original = length_m / speed_mps if speed_mps > 0 else length_m / (30/3.6)
+            props["time_original"] = time_original
+        else:
+            time_original = props["time_original"]
+        
+        # Apply congestion factor
+        if i in congestion_values:
+            congestion = congestion_values[i]
+            # BPR formula: new_time = free_flow_time * (1 + α*(v/c)^β)
+            # We already computed congestion = 1 + α*(utilization)^β
+            # So: new_time = time_original * congestion
+            new_time = time_original * congestion
+        else:
+            new_time = time_original
+        
+        edge_times[i] = new_time
+        props["time_updated"] = new_time
+    
+    return edge_times
+
+def reassign_flows(features, edge_times, router):
+    # Update edge impedances in the router's graph
+    for i, feature in enumerate(features):
+        props = feature["properties"]
+        u = props.get("u")
+        v = props.get("v")
+        
+        if u is None or v is None:
+            continue
+            
+        # Find the edge in the graph and update its impedance
+        if router.graph.has_edge(u, v):
+            for key in router.graph[u][v]:
+                # Update with new travel time
+                router.graph[u][v][key]['impedance'] = edge_times.get(i, 
+                    router.graph[u][v][key].get('length', 0))
+    
+    # Rebuild sparse graph with updated impedances
+    router.build_sparse_graph()
+    
+    # Clear old flows and re-route
+    router.edge_flows.clear()
+    router.process_all(output_file='temp_reassigned_flows.geojson', force=True)
+    
+    # Update flows in features based on new routing
+    flow_lookup = {(u, v): flow for (u, v, key), flow in router.edge_flows.items()}
+
+    for i, feature in enumerate(features):
+        props = feature["properties"]
+        u = props.get("u")
+        v = props.get("v")
+        
+        if u is not None and v is not None:
+            # Direct lookup instead of nested loop
+            props["flow"] = flow_lookup.get((u, v), 0.0)
+
+print("Initializing router...")
+router = VectorRouter("Yogyakarta, Indonesia", cache_dir="./osm_cache")
+router.load_network(force_download=False)
+router.load_data(
+    points_file="data/raw/rea_1000m.geojson",
+    vectors_file="data/raw/rea_1000m_vectors_v2.json"
+)
+router.precompute_nearest_nodes()
 
 # Load data
 with open(input_path, "r") as f:
     data = json.load(f)
 
+print(f"Starting congestion feedback loop ({ITERATIONS} iterations)...")
+
 features = data["features"]
 
-# First pass: add noise to flows and calculate edge bearings
-for i, feature in enumerate(features):
+for feature in features:
     props = feature["properties"]
-    
-    # Add noise to flow
-    if "flow" not in props or props["flow"] is None:
-        continue
-    f = float(props["flow"])
-    f_noisy = f * (1 + random.uniform(-NOISE, NOISE))
-    props["flow_noisy"] = f_noisy
-    
-    # Calculate bearing for corridor grouping
-    bearing = calculate_edge_bearing(feature)
-    props["_bearing"] = bearing
-    props["_bearing_bin"] = bin_bearing(bearing) if bearing is not None else 0
+    if "flow" in props:
+        props["flow_original"] = float(props["flow"])
 
+for iteration in range(ITERATIONS):
+    print(f"\n--- Iteration {iteration + 1}/{ITERATIONS} ---")
+
+    for feature in features:
+        props = feature["properties"]
+        # Keep only essential properties
+        keys_to_keep = ["u", "v", "length_m", "highway", "name", "flow", "flow_original"]
+        new_props = {}
+        for key in keys_to_keep:
+            if key in props:
+                new_props[key] = props[key]
+        feature["properties"] = new_props
+
+    # First pass: add noise to flows and calculate edge bearings
+    for i, feature in enumerate(features):
+        props = feature["properties"]
+        
+        # Add noise to flow
+        if "flow" not in props or props["flow"] is None:
+            continue
+        f = float(props["flow"])
+        f_noisy = f * (1 + random.uniform(-NOISE, NOISE))
+        props["flow_noisy"] = f_noisy
+        
+        # Calculate bearing for corridor grouping
+        bearing = calculate_edge_bearing(feature)
+        props["_bearing"] = bearing
+        props["_bearing_bin"] = bin_bearing(bearing) if bearing is not None else 0
+
+
+    # Second pass: compute capacity, utilization, and congestion
+    congestion_values = {}
+    for i, feature in enumerate(features):
+        props = feature["properties"]
+
+        # Skip if no flow
+        if "flow_noisy" not in props:
+            continue
+
+        f_noisy = props["flow_noisy"]
+        
+        # Get road length (in meters)
+        length_m = float(props.get("length_m", 100.0))  # default to 100m if unknown
+        
+        # Get highway type
+        highway_type = props.get("highway")
+        if isinstance(highway_type, list):
+            highway_type = highway_type[0] if highway_type else None
+        
+        # Get capacity coefficient and utilization factor
+        capacity_coeff = CAPACITY_COEFF_BY_TYPE.get(highway_type, CAPACITY_COEFF_DEFAULT)
+        utilization_factor = UTILIZATION_FACTOR_BY_TYPE.get(highway_type, UTILIZATION_FACTOR_DEFAULT)
+        
+        # Step 2: Define capacity proxy = road class coefficient * length
+        capacity = capacity_coeff * length_m
+        
+        # Step 3: Compute utilization and apply road-type adjustment
+        if capacity > 0:
+            utilization = f_noisy / capacity
+            # Apply utilization adjustment factor
+            utilization *= utilization_factor
+        else:
+            utilization = 0.0
+        
+        # Clip utilization ratio
+        utilization = min(utilization, R_MAX)
+        
+        # Step 4: Convert utilization to congestion using BPR (light) - power of 2
+        congestion = 1 + ALPHA * (utilization ** BETA)
+        
+        # Store congestion for smoothing
+        congestion_values[i] = congestion
+        
+        # Store initial results
+        props["capacity_est"] = capacity
+        props["capacity_coeff"] = capacity_coeff
+        props["length_m"] = length_m
+        props["utilization"] = utilization
+        props["congestion_initial"] = congestion
+        props["utilization_factor"] = utilization_factor
+        props["highway_type"] = highway_type
+
+
+    print("Updating travel times...")
+    edge_times = update_travel_times(features, congestion_values)
+
+    if iteration < ITERATIONS - 1:
+        print("Reassigning flows...")
+        reassign_flows(features, edge_times, router)
+        print("Routes reassigned")
+
+    # Track convergence
+    if iteration > 0:
+        # Simple convergence check: compare total flow difference
+        total_flow = sum(float(f["properties"].get("flow", 0)) for f in features)
+        prev_total_flow = sum(float(f["properties"].get("flow_prev_iter", 0)) for f in features)
+        
+        if prev_total_flow > 0:
+            flow_change = abs(total_flow - prev_total_flow) / prev_total_flow
+            print(f"Flow change: {flow_change:.3%}")
+
+            # Optional: early stopping
+            if flow_change < CONVERGENCE_THRESHOLD:
+                print(f"Converged after {iteration + 1} iterations (change < {CONVERGENCE_THRESHOLD:.1%})")
+                break
+
+    for feature in features:
+        props = feature["properties"]
+        if "flow" in props:
+            props["flow_prev_iter"] = float(props["flow"])
+
+
+print("\n--- Feedback loop complete ---")
 
 # Build edge graph for spatial smoothing
 print("Building edge graph for spatial smoothing...")
 edge_neighbors = build_edge_graph(features)
 
-# Second pass: compute capacity, utilization, and congestion
-congestion_values = {}
-for i, feature in enumerate(features):
-    props = feature["properties"]
-
-    # Skip if no flow
-    if "flow_noisy" not in props:
-        continue
-
-    f_noisy = props["flow_noisy"]
-    
-    # Get road length (in meters)
-    length_m = float(props.get("length_m", 100.0))  # default to 100m if unknown
-    
-    # Get highway type
-    highway_type = props.get("highway")
-    if isinstance(highway_type, list):
-        highway_type = highway_type[0] if highway_type else None
-    
-    # Get capacity coefficient and utilization factor
-    capacity_coeff = CAPACITY_COEFF_BY_TYPE.get(highway_type, CAPACITY_COEFF_DEFAULT)
-    utilization_factor = UTILIZATION_FACTOR_BY_TYPE.get(highway_type, UTILIZATION_FACTOR_DEFAULT)
-    
-    # Step 2: Define capacity proxy = road class coefficient * length
-    capacity = capacity_coeff * length_m
-    
-    # Step 3: Compute utilization and apply road-type adjustment
-    if capacity > 0:
-        utilization = f_noisy / capacity
-        # Apply utilization adjustment factor
-        utilization *= utilization_factor
-    else:
-        utilization = 0.0
-    
-    # Clip utilization ratio
-    utilization = min(utilization, R_MAX)
-    
-    # Step 4: Convert utilization to congestion using BPR (light) - power of 2
-    congestion = 1 + ALPHA * (utilization ** BETA)
-    
-    # Store congestion for smoothing
-    congestion_values[i] = congestion
-    
-    # Store initial results
-    props["capacity_est"] = capacity
-    props["capacity_coeff"] = capacity_coeff
-    props["length_m"] = length_m
-    props["utilization"] = utilization
-    props["congestion_initial"] = congestion
-    props["utilization_factor"] = utilization_factor
-    props["highway_type"] = highway_type
-
-
-# Fix 1 — Spatial smoothing
+# Spatial smoothing
 print("Applying spatial smoothing...")
 for i, feature in enumerate(features):
     props = feature["properties"]
@@ -241,7 +390,7 @@ for i, feature in enumerate(features):
     congestion_values[i] = congestion_smooth
 
 
-# Fix 2 — Corridor-level congestion
+# Corridor-level congestion
 print("Computing corridor-level congestion...")
 
 # Group edges by: road class, name, bearing bin
@@ -340,3 +489,5 @@ with open(output_path, "w") as f:
 print(f"Saved to {output_path}")
 print(f"Processed {len(features)} features")
 print(f"Created {len(corridor_groups)} corridor groups")
+
+#w

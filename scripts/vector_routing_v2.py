@@ -246,7 +246,6 @@ class VectorRouter:
             f"from {len(origin_ids)} origins"
         )
 
-        self.save_edge_flows_cache()
         self.save_edge_flows(output_file)
 
 

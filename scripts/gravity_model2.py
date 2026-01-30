@@ -176,6 +176,14 @@ class ImprovedGravityModel:
         print(f"  Beta (attraction elasticity): {beta}")
         print(f"  Total trips target: {total_trips if total_trips else 'Not specified'}")
         
+        if total_trips is not None:
+            productions = productions * total_trips
+            attractions = attractions * total_trips
+        else:
+            # If no total_trips specified, use original values
+            productions = productions.copy()
+            attractions = attractions.copy()
+
         # Step 1: Calculate unnormalized gravity matrix
         print("  Step 1: Calculating gravity model...")
         start_time = time.time()
@@ -193,14 +201,9 @@ class ImprovedGravityModel:
         print(f"    Gravity model calculated in {gravity_time:.2f} seconds")
         print(f"    Unnormalized total: {T0.sum():.2f}")
         
-        # Step 2: Scale to total trips if specified
-        if total_trips is not None:
-            scale_factor = total_trips / T0.sum()
-            T0 = T0 * scale_factor
-            print(f"  Step 2: Scaled to {total_trips:.0f} trips (scale factor: {scale_factor:.6f})")
         
-        # Step 3: IPF balancing
-        print("  Step 3: Applying IPF balancing...")
+        # Step 2: IPF balancing
+        print("  Step 2: Applying IPF balancing...")
         start_time = time.time()
         
         T_balanced = self.ipf_balancing(
@@ -281,6 +284,42 @@ class ImprovedGravityModel:
         
         print(f"    Production error (MAE): {prod_error:.3%}")
         print(f"    Attraction error (MAE): {attr_error:.3%}")
+
+    def calculate_average_distance(self, od_matrix: np.ndarray, 
+                                distance_matrix: np.ndarray,
+                                purpose_name: str) -> float:
+        """
+        Calculate weighted average trip distance for a given OD matrix
+        
+        Parameters:
+        -----------
+        od_matrix: OD matrix with trip counts
+        distance_matrix: Distance matrix (same shape as od_matrix)
+        purpose_name: Name of trip purpose for printing
+        
+        Returns:
+        --------
+        Weighted average distance in same units as distance_matrix
+        """
+        # Create masks for non-zero trips
+        non_zero_mask = od_matrix > 0
+        
+        if not non_zero_mask.any():
+            return 0.0
+        
+        # Get non-zero trips and corresponding distances
+        trips = od_matrix[non_zero_mask]
+        distances = distance_matrix[non_zero_mask]
+        
+        # Calculate weighted average
+        weighted_sum = np.sum(trips * distances)
+        total_trips = np.sum(trips)
+        
+        average_distance = weighted_sum / total_trips if total_trips > 0 else 0.0
+        
+        print(f"\n  Average {purpose_name} trip distance: {average_distance:.2f} meters")
+        
+        return average_distance
     
     def save_sparse_vectors(self, od_matrix: np.ndarray,
                            grid_ids: np.ndarray,
@@ -360,9 +399,9 @@ def main():
         grid_ids = gdf[id_cols[0]].values if id_cols else np.arange(len(gdf))
         
         # Normalize to sum to 1 for IPF
-        residential = residential / residential.sum() * len(gdf)
-        employment = employment / employment.sum() * len(gdf)
-        amenity = amenity / amenity.sum() * len(gdf)
+        residential = residential / residential.sum() 
+        employment = employment / employment.sum() 
+        amenity = amenity / amenity.sum() 
         
         print(f"  Loaded {len(gdf)} grid cells")
         print(f"  Residential sum: {residential.sum():.1f}")
@@ -383,11 +422,11 @@ def main():
     print("\nCalculating distance matrix...")
     distance_matrix = model.calculate_distances(coordinates)
     
-    # Step 1: Define total trips per purpose
-    # You can adjust these based on your study area
-    total_trips_hbw = 10000.0   # T_HBW = 1.0
-    total_trips_hbnw = 6000.0   # T_HBNW = 0.6
-    total_trips_nhb = 4000.0    # T_NHB = 0.4
+    # Step 1: Define total trip ratios per purpose
+    # (Devi et al., 2019)
+    total_trips_hbw = 62.38   
+    total_trips_hbnw = 27.77   
+    total_trips_nhb = 9.86      
     
     # Step 2-4: Calculate each trip purpose with IPF
     od_matrices = {}
@@ -399,13 +438,14 @@ def main():
         distance_matrix=distance_matrix,
         purpose_name="HBW",
         purpose_params={
-            'gamma': 1.4,        # Work trips are more distance-sensitive
+            'gamma': 1.3,        # Fine with longer trip
             'total_trips': total_trips_hbw,
             'alpha': 1.0,
             'beta': 1.0
         }
     )
     od_matrices['HBW'] = od_hbw
+    avg_hbw_distance = model.calculate_average_distance(od_hbw, distance_matrix, "HBW")
     
     # HBNW: Home-Based Non-Work (Residential -> Amenity)
     od_hbnw = model.calculate_trip_purpose(
@@ -414,13 +454,14 @@ def main():
         distance_matrix=distance_matrix,
         purpose_name="HBNW",
         purpose_params={
-            'gamma': 2.5,        # Non-work trips are less distance-sensitive
+            'gamma': 4,        # Prefer spots that's closer to home
             'total_trips': total_trips_hbnw,
             'alpha': 1.0,
             'beta': 1.0
         }
     )
     od_matrices['HBNW'] = od_hbnw
+    avg_hbnw_distance = model.calculate_average_distance(od_hbnw, distance_matrix, "HBNW")
     
     # NHB: Non-Home-Based (Employment -> Amenity)
     od_nhb = model.calculate_trip_purpose(
@@ -429,20 +470,21 @@ def main():
         distance_matrix=distance_matrix,
         purpose_name="NHB",
         purpose_params={
-            'gamma': 2.0,        # Intermediate distance sensitivity
+            'gamma': 3,        # Much prefer shorter destinations
             'total_trips': total_trips_nhb,
             'alpha': 1.0,
             'beta': 1.0
         }
     )
     od_matrices['NHB'] = od_nhb
+    avg_nhb_distance = model.calculate_average_distance(od_nhb, distance_matrix, "NHB")
     
     # Step 5: Combine trip purposes
-    # You can adjust these weights based on time of day or other factors
+    # Right now its peak AM rush hour
     weights = {
-        'HBW': 0.5,   # 50% of total trips
+        'HBW': 0.6,   # 60% of total trips
         'HBNW': 0.3,  # 30% of total trips
-        'NHB': 0.2    # 20% of total trips
+        'NHB': 0.1    # 10% of total trips
     }
     
     combined_od = model.combine_trip_purposes(od_matrices, weights)
@@ -457,6 +499,13 @@ def main():
         grid_ids=grid_ids,
         filename='data/raw/rea_1000m_vectors_v2.json'
     )
+
+    # Calculate weighted average distances across all purposes
+    total_avg_distance = (
+        avg_hbw_distance * weights['HBW'] + 
+        avg_hbnw_distance * weights['HBNW'] + 
+        avg_nhb_distance * weights['NHB']
+    )
         
     print(f"\n{'='*60}")
     print("PROCESS COMPLETED!")
@@ -464,6 +513,12 @@ def main():
     print(f"Total combined trips: {combined_od.sum():.0f}")
     print(f"Number of origins: {len(combined_od)}")
     print(f"Number of OD pairs: {(combined_od > 0).sum():,}")
+
+    print("DISTANCES ANALYTICS")
+    print(f"Weighted average trip distance: {total_avg_distance/1000:.2f} km")
+    print(f"HBW average: {avg_hbw_distance/1000:.2f} km")
+    print(f"HBNW average: {avg_hbnw_distance/1000:.2f} km")
+    print(f"NHB average: {avg_nhb_distance/1000:.2f} km")
 
 if __name__ == "__main__":
     main()

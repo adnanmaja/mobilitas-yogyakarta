@@ -85,7 +85,7 @@ def enhanced_origin_analysis():
             'industrial': True,
             'landuse': ['industrial', 'retail'],
             'commercial': True,
-            'building': ['commercial', 'university', 'hospital', 'college'],
+            'building': ['commercial', 'university', 'college'],
             'retail': True,
             'craft': True,
             'healthcare': ['hospital', 'clinic', 'doctors'],
@@ -155,16 +155,16 @@ def enhanced_origin_analysis():
                 'restaurant', 'cafe', 'fast_food', 'bar', 'pub',
                 'marketplace', 'supermarket', 'convenience',
                 'bank', 'atm', 'pharmacy',
-                'place_of_worship',  # Includes mosques, churches, temples
+                'place_of_worship', 
                 'police', 'fire_station', 'post_office',
                 'library', 'theatre', 'cinema', 'arts_centre',
                 'sports_centre', 'swimming_pool', 'stadium',
-                'wetland', 'conference_centre'
+                'wetland', 'conference_centre', 'hospital'
             ],
-            'building': ['commercial'],
-            'shop': True,  # All shops
+            'building': ['commercial', 'police', 'clinic'],
+            'shop': True, 
             'leisure': ['park', 'garden', 'playground', 'sports_centre', 'golf_course', 'stadium'],
-            'tourism': ['hotel', 'guest_house', 'hostel', 'museum', 'attraction'],
+            'tourism': ['hotel', 'guest_house', 'hostel', 'museum', 'attraction', 'theme_park'],
             'natural': ['beach']
         }
         
@@ -184,15 +184,12 @@ def enhanced_origin_analysis():
                 intersecting_cells = grid[grid.intersects(feature.geometry)]
                 
                 if len(intersecting_cells) > 0:
-                    # Add score (amenities are generally smaller, so lower base score)
                     score = 2  # Base score for amenities
                     
                     # Higher score for important amenities
                     if 'amenity' in feature:
-                        if feature['amenity'] in ['hospital', 'university', 'college']:
+                        if feature['amenity'] in ['supermarket', 'marketplace', 'cafe', 'restaurant', 'fast_food']:
                             score = 5
-                        elif feature['amenity'] in ['supermarket', 'marketplace']:
-                            score = 3
                     
                     for cell_idx in intersecting_cells.index:
                         try:
@@ -204,9 +201,7 @@ def enhanced_origin_analysis():
                             amenity_scores[cell_idx] += score / len(intersecting_cells)
         
         # MANUAL ADDITION: Malioboro Street area (famous shopping/tourist area in Yogyakarta)
-        # Approximate coordinates for Malioboro area
-        malioboro_bounds = box(429798, 9137207, 430309, 9139673)  # Adjust based on your CRS
-        malioboro_bounds = malioboro_bounds  # Ensure same CRS
+        malioboro_bounds = box(429798, 9137207, 430309, 9139673)  # UTM 49s
         
         # Find cells in Malioboro area
         malioboro_cells = grid[grid.intersects(malioboro_bounds)]
@@ -216,9 +211,13 @@ def enhanced_origin_analysis():
             intersection = grid.loc[cell_idx, 'geometry'].intersection(malioboro_bounds)
             if hasattr(intersection, 'area') and intersection.area > 0:
                 weight = intersection.area / grid.loc[cell_idx, 'geometry'].area
-                amenity_scores[cell_idx] += 7 * weight  # Significant bonus
+                amenity_scores[cell_idx] += 6 * weight  # Significant bonus
         
+        amenity_scores = np.log1p(amenity_scores)
+        amenity_scores = np.minimum(amenity_scores, 3.0)
+  
         grid['amenity_intensity'] = amenity_scores
+
         
         # Normalize to 0-100
         if grid['amenity_intensity'].max() > 0:
@@ -315,12 +314,6 @@ print(f"Cells with residential intensity > 0: {(grid['residential_intensity'] > 
 print(f"Cells with employment/edu intensity > 0: {(grid['employment_edu_intensity'] > 0).sum()}")
 print(f"Cells with amenity intensity > 0: {(grid['amenity_intensity'] > 0).sum()}")
 print(f"Cells with combined intensity > 0: {(grid['combined_intensity'] > 0).sum()}")
-
-# Calculate and display correlation between intensities
-print("\n=== CORRELATIONS ===")
-corr_matrix = grid[['residential_intensity', 'employment_edu_intensity', 'amenity_intensity']].corr()
-print("Correlation matrix:")
-print(corr_matrix)
 
 # Find top intensity cells for each category
 print("\n=== TOP CELLS BY CATEGORY ===")
