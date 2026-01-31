@@ -45,9 +45,8 @@ The final demand matrix is obtained by a weighted combination of all trip types.
 Trips between grid cells `i` and `j` are generated using gravity models, with distinct distance-decay parameters per trip type. <br>
 
 **General form:** <br>
-$$
-T_{ij}^{(p)} = k_p \frac{O_i^{\alpha_p} D_j^{\beta_p}}{d_{ij}^{\gamma_p}}
-$$<br>
+$T_{ij}^{(p)} = k_p \frac{O_i^{\alpha_p} D_j^{\beta_p}}{d_{ij}^{\gamma_p}}$
+<br>
 **Where**:
 - $T_{ij}^{(p)}$ = number of trips from zone $i$ to zone $j$ for trip purpose $p$
 - $p \in {\text{HBW}, \text{HBNW}, \text{NHB}}$
@@ -75,9 +74,7 @@ An Origin-Destination (OD) matrix containing estimated trip volumes between all 
 
 ### E. Congestion Modeling
 Congestion is modeled using a Bureau of Public Roads (BPR) function:
-$$
-t = t_0 \left( 1 + \alpha \left( \frac{v}{c} \right)^{\beta} \right)
-$$
+$t = t_0 \left( 1 + \alpha \left( \frac{v}{c} \right)^{\beta} \right)$
 Where: <br>
 - $t$ = congested travel time
 - $t_0$ = free-flow travel time
