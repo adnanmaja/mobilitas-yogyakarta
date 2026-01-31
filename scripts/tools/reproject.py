@@ -1,11 +1,10 @@
 from rasterio.warp import calculate_default_transform, reproject, Resampling
-import numpy as np
 import rasterio
 
-worldpop_path = "clipped_2025_yogyakarta_100m.tif"
+original_path = "data/raw/VIIRS/Cropped_VNL_npp_2024_global_vcmslcfg_v2_c202502261200.average_masked.dat.tif"
 dst_crs = "EPSG:32749"
 
-with rasterio.open(worldpop_path) as src:
+with rasterio.open(original_path) as src:
     transform, width, height = calculate_default_transform(
         src.crs, dst_crs, src.width, src.height, *src.bounds
     )
@@ -18,15 +17,18 @@ with rasterio.open(worldpop_path) as src:
         "height": height
     })
     
-    reprojected_path = "clipped_utm49s_2025_yogyakarta_100m.tif"
+    reprojected_path = "data/raw/VIIRS/Cropped_reproj_VNL_npp_2024_global_vcmslcfg_v2_c202502261200.average_masked.dat.tif"
     
     with rasterio.open(reprojected_path, "w", **kwargs) as dst:
-        reproject(
-            source=rasterio.band(src, 1),
-            destination=rasterio.band(dst, 1),
-            src_transform=src.transform,
-            src_crs=src.crs,
-            dst_transform=transform,
-            dst_crs=dst_crs,
-            resampling=Resampling.sum  
-        )
+        for i in range(1, src.count + 1):
+            reproject(
+                source=rasterio.band(src, i),
+                destination=rasterio.band(dst, i),
+                src_transform=src.transform,
+                src_crs=src.crs,
+                dst_transform=transform,
+                dst_crs=dst_crs,
+                resampling=Resampling.bilinear 
+            )
+
+print("done")

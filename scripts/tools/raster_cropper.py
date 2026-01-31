@@ -1,13 +1,13 @@
-# Crop the Indonesia raster to only keep Yogyakarta (DIY) raster
+# Crop rasters to DIY boundaries
 import rasterio
 from rasterio.mask import mask
 import geopandas as gpd
 import json
 
 
-gdf = gpd.read_file("Yogyakarta.geojson")
+gdf = gpd.read_file("data/raw/Yogyakarta.geojson")
 
-with rasterio.open("idn_pop_2025_CN_100m_R2025A_v1.tif") as src:
+with rasterio.open("data/raw/VIIRS/VNL_npp_2024_global_vcmslcfg_v2_c202502261200.average_masked.dat.tif") as src:
     gdf = gdf.to_crs(src.crs)
     
     shapes = [json.loads(gdf.to_json())['features'][0]['geometry']]
@@ -23,7 +23,7 @@ out_meta.update({
     "transform": out_transform
 })
 
-with rasterio.open("v2_clipped_2025_yogyakarta_100m.tif", "w", **out_meta) as dest:
+with rasterio.open("data/raw/VIIRS/Cropped_VNL_npp_2024_global_vcmslcfg_v2_c202502261200.average_masked.dat.tif", "w", **out_meta) as dest:
     dest.write(out_image)
 
-print("Crop complete! Your file size just dropped significantly.")
+print("Completed")

@@ -7,59 +7,136 @@ As I fell into urban planning content, a simple question stuck with me: instead 
 Anyway, its a computational simulation modeling origin-destination traffic patterns, route assignment, and congestion levels across Yogyakarta's road network. The model generates visual heatmaps of traffic flow and congestion, which can hypothetically be used to identify chronic choke points and explore hypothetical transport or infrastructure scenarios before real-world implementation.
 
 ## Project Scope
-This project is an exploratory, proof-of-concept simulation developed as a personal semester break project. The goal is not predictive accuracy, but to understand how population distribution, destinations, and road networks interact to produce congestion patterns at a city scale. 
+This is a proof-of-concept, city-scale traffic simulation developed as a personal project. It is not intended for operational forecasting or policy evaluation, but as a sandbox for experimenting with:
+- Land-use–driven trip generation
+- Multi-purpose travel demand
+- Gravity-based trip distribution
+- Congestion-aware route assignment
+- Feedback between demand, congestion, and travel cost
 
 ## Methodology & Pipeline
-### A. Data Preparation & Gridding
-The region, Special Region of Yogyakarta was divided into a grid of 1km2. This resolution was chosen as a compromise between spatial detail (capturing neighborhood-level variations) and computational feasibility for a desktop-based simulation.
-- **Origin points (O)** : Origin points for each grid was derived 70% from WorldPop population raster (100m resolution), representing trip origins from residential areas. The other 30% are derived from OpenStreetMap (OSM) road data (excluding major highways), approximating trips originating from local streets
-- **Destination points (D)** : A composite score from: OSM point-of-interest tags (45%), road density (20%), intersections (15%), and manually added special locations e.g., Malioboro (20%). Here, i defined three distinct attractiveness scenarios: 
-    * Peak Rush Hour: Weights biased towards commercial/business/education tags.
-    * Chill Hour: Weights biased towards residential/local amenities.
-    * Weekends: Weights biased towards recreational/tourist/shopping tags.
+### A. Spatial Framework & Intensity Surfaces
+The Special Region of Yogyakarta (DIY) is discretized into a 1 km × 1 km grid, balancing spatial detail with computational tractability. <br>
+Each grid cell is characterized by continuous intensity measures:
+- **Residential Intensity**<br>
+Derived from WorldPop population raster data, representing trip production potential.
+- **Employment Intensity**<br>
+Approximated using a combination of:
+    - GHSL built-up non-residential volume
+    - VIIRS night-time light intensity
+- **Amenity Intensity**<br>
+Derived from Overture Maps Foundation POIs, representing non-work destinations such as retail, services, leisure, and social activities.
 
-### B. Trip Generation & Distribution
-Trips between an origin grid `i` and a destination grid `j` are calculated based on the attractiveness of `j` and the impedance (discouraging effect) of distance.
-- **Formula** : ``T_ij = 𝑘 * (O_i^α * D_j^β) / (d_ij^𝛾)``, where:
-    * ``T_ij`` = Estimated number of trips from origin cell i to destination cell j.
-    * ``O_i`` = Origin “mass” of cell i, representing the trip-generating potential of the area (e.g., population density and local road presence).
-    * ``D_j^β`` = Destination “mass” of cell j, representing the attractiveness of the area (e.g., points of interest, road density, intersections, and special locations).
-    * ``d_ij`` = Distance between origin cell i and destination cell j, acting as a deterrence factor for longer trips.
-    * ``𝑘`` = Scaling constant used to adjust overall trip volume to a reasonable magnitude.
-    * ``α`` = Controls how strongly trip generation scales with origin mass.
-    * ``β`` = Controls how strongly destination attractiveness influences trip volume.
-    * ``𝛾`` = Distance decay parameter; higher values penalize long-distance trips more strongly.
-- **Parameters** : ``α=1.0, β=1.0, γ=2.0`` These parameters control the sensitivity to origin mass, destination mass, and distance decay. The values were chosen as standard defaults for an initial proof-of-concept simulation, following common practice in rudimentary gravity models.
-- **Output** :  An Origin-Destination (OD) matrix containing estimated trip volumes between all grid pairs.
+These layers form the spatial basis for trip generation across different trip purposes.
 
-### C. Route Assignment & Network Handling
-- **Network** : OpenStreetMap route network via ``osmnx``
+### B. Trip Purpose Segmentation & Temporal Weighting
+Travel demand is decomposed into three OD matrices, each representing a distinct behavioral class:
+1. **Home-Based Work (HBW)**<br>
+Residential → employment-driven trips
+2. **Home-Based Non-Work (HBNW)**<br>
+Residential → amenity-driven trips
+3. **Non-Home-Based (NHB)**<br>
+Trips not anchored at home (e.g., work → amenity, amenity → amenity)
+
+Each OD matrix is further adjusted using time-of-day weights, allowing demand composition to shift between peak and off-peak conditions. <br>
+The final demand matrix is obtained by a weighted combination of all trip types.
+
+### C. Trip Distribution: Purpose-Specific Gravity Models
+Trips between grid cells `i` and `j` are generated using gravity models, with distinct distance-decay parameters per trip type. <br>
+
+**General form:** <br>
+$$
+T_{ij}^{(p)} = k_p \frac{O_i^{\alpha_p} D_j^{\beta_p}}{d_{ij}^{\gamma_p}}
+$$<br>
+**Where**:
+- $T_{ij}^{(p)}$ = number of trips from zone $i$ to zone $j$ for trip purpose $p$
+- $p \in {\text{HBW}, \text{HBNW}, \text{NHB}}$
+- $O_i$ = origin intensity of zone $i$
+- $D_j$ = destination intensity of zone $j$
+- $d_{ij}$ = distance between zones $i$ and $j$
+- $k_p$ = scaling constant for trip purpose $p$
+- $\alpha_p$ = origin elasticity parameter
+- $\beta_p$ = destination elasticity parameter
+- $\gamma_p$ = distance decay parameter for trip purpose $p$
+<br>
+
+Distance-decay values are calibrated using findings from (Devi et al., 2019), reflecting observed differences in trip-length tolerance across purposes (e.g., work trips tolerate longer distances than discretionary trips).
+
+**Output** <br>
+An Origin-Destination (OD) matrix containing estimated trip volumes between all grid pairs.
+
+### D. Route Assignment & Network Handling
+- **Road Network** : OpenStreetMap route network via ``osmnx``
 - **Routing** : Each OD pair's trip volume is assigned to a path on the network using Dijkstra's shortest-path algorithm
-- **Cost Function** : The algorithm prioritizes higher-capacity roads (e.g., primary > secondary > tertiary) by assigning them lower traversal costs, encouraging logical route choices. OD demands are split accross top-k shortest path (k=30)
-- **Output** : Aggregate flow volume for every edge (road segment) in the network.
+- **Initial Cost** : Free-flow travel time, adjusted by relative road class capacity
+- **Assignment Method** : 
+    - OD flows are distributed across multiple shortest paths (top-k routing)
+    - Routing costs are updated iteratively as congestion evolves
 
-### D. Congestion Modeling
-well its pretty much is this set of concepts, of which i cant explain:
-- After assigning trips to the road network, each road segment accumulates a total traffic flow. Since real-world road capacity data is unavailable, the model assumes that the observed flow on each segment represents a proxy for near-capacity conditions.
-- Traffic congestion is estimated using a volume-to-capacity style ratio, where higher relative flow implies higher congestion. This ratio is normalized across the network and mapped to discrete congestion levels for visualization.
-- To better reflect real-world variability such as driver behavior, traffic signals, and unmodeled disruptions, controlled random noise is added to the congestion values. This prevents unrealistically uniform patterns and produces more organic-looking congestion distributions.
+### E. Congestion Modeling
+Congestion is modeled using a Bureau of Public Roads (BPR) function:
+$$
+t = t_0 \left( 1 + \alpha \left( \frac{v}{c} \right)^{\beta} \right)
+$$
+Where: <br>
+- $t$ = congested travel time
+- $t_0$ = free-flow travel time
+- $v$ = traffic volume on the segment or corridor
+- $c$ = effective capacity
+- $v/c$ = volume-to-capacity ratio
+- $\alpha, \beta$ = BPR calibration parameters
+
+Key extensions:
+- **Relative Capacity by Road Type**<br>
+Capacities are defined in relative terms (e.g., primary > secondary > tertiary), rather than absolute veh/hr.
+- **Utilization Ratios by Trip Type**<br>
+Different trip purposes contribute differently to effective congestion.
+- **Spatial Smoothing**<br>
+Congestion is smoothed across neighboring edges to reduce artificial discontinuities and better represent spillback effects.
+- **Corridor-Level Congestion**<br>
+Congestion is aggregated and applied at corridor scale rather than strictly per-edge, improving network realism.
+
+### F. Congestion Feedback Loop
+The model implements a static iterative assignment, introducing feedback between congestion and routing:
+1. Assign OD flows to the network
+2. Compute congestion using BPR
+3. Update edge travel times
+4. Re-route OD flows using updated costs
+5. Repeat for 5–10 iterations until changes stabilize
+
+This captures first-order congestion feedback without full dynamic traffic simulation.
+
 
 ## Results & Vsiualization
 The resulting data have been visualized into an interactive map using maplibre. [Check it out!](https://adnanmaja.github.io/mobilitas-yogyakarta) <br>
-Additionally, figures can be found at ```data/figures```
+Additionally, static figures can be found at ```data/figures```
 
 ## Limitations & Assumptions
-- **Parameters** : The gravity model parameters ``(α, β, γ)``, attractiveness weights, and road capacity values are uncalibrated estimates. A real application would require calibration against sensor or survey data.
-- **Demand** : Trip generation is static and based on population/POI density, not dynamic time-of-day demands.
+- **Calibration** : While distance-decay parameters are literature-informed, most other parameters remain heuristic.
+- **Static  Demand** : No within-period demand dynamics or departure-time choice modeling.
 - **Behaviour** : The model uses a simple user-equilibrium (all drivers choose the perceived shortest path). It does not account for driver learning, real-time information, or stochastic variations.
-- **Grid & Data Resolution** : The 1km grid and OSM data completeness impose a limit on spatial precision.
+- **Capacity Representation**: Relative rather than measured capacities; no lane-level or signal modeling.
+- **Grid & Data Resolution** : 1 km grid limits fine-grained neighborhood analysis.
 
-## Technical Implementations
-- **Languages & Libraries** : Python, pandas, numpy, geopandas, osmnx, scipy
-- **Data Sources** : WorldPop, OpenStreetMap.
+## Technical Stack
+- **Languages** : Python, Javascript
+- **Core Libraries** : pandas, numpy, geopandas, osmnx, scipy
+- **Data Sourcers**:
+    - [WorldPop](https://www.worldpop.org/)
+    - [GHSL (European Commission)](https://human-settlement.emergency.copernicus.eu/)
+    - [VIIRS Nighttime Lights (Earth Observation Group)](https://eogdata.mines.edu/products/vnl/)
+    - [Overture Maps](https://overturemaps.org/)
+    - [OpenStreetMap](https://www.openstreetmap.org/about) © OpenStreetMap contributors
+- **Basemap & Rendering**: [MapLibre GL JS](https://maplibre.org/) with styles hosted by [MapTiler](https://www.maptiler.com/)<br>
+ © MapTiler © OpenStreetMap contributors.
 
 ## Future Work
-- Improving congestion models with feedback loop
-- Better routing with more random and organic route choices
-- Determine the impact of the current existing transit routes
-- Explore future public transit scenario potentials
+- More robust calibration using observed traffic or mobile-phone data
+- Stochastic and multi-class route choice models
+- Explicit public transport and mode choice integration
+- Scenario testing for land-use or infrastructure changes
+- Transition toward quasi-dynamic or mesoscopic simulation
+
+## Acknowledgements
+Devi, M. K., et al. (2019). Travel Behavior Pattern in Yogyakarta Urbanized Area. Proceedings of the Eastern Asia Society for Transportation Studies, 12.
+https://www.researchgate.net/publication/338865315
