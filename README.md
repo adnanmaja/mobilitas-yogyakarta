@@ -73,8 +73,9 @@ An Origin-Destination (OD) matrix containing estimated trip volumes between all 
     - Routing costs are updated iteratively as congestion evolves
 
 ### E. Congestion Modeling
-Congestion is modeled using a Bureau of Public Roads (BPR) function:
+Congestion is modeled using a Bureau of Public Roads (BPR) function: <br>
 $t = t_0 \left( 1 + \alpha \left( \frac{v}{c} \right)^{\beta} \right)$
+<br>
 Where: <br>
 - $t$ = congested travel time
 - $t_0$ = free-flow travel time
