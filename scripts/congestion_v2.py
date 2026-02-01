@@ -43,7 +43,7 @@ REASSIGN_METHOD = "proportional"  # "proportional" or "all-or-nothing"
 CONVERGENCE_THRESHOLD = 0.01  # 1% change threshold
 
 input_path = "data/raw/rea_1000m_edge_flows_v2.geojson"
-output_path = "data/raw/rea_1000m_congestions_v2.geojson"
+output_path = "data/raw/rea_1000m_congestions_v3.geojson"
 
 
 # Helper function to get bearing between two coordinates
@@ -224,7 +224,7 @@ print("Initializing router...")
 router = VectorRouter("Yogyakarta, Indonesia", cache_dir="./osm_cache")
 router.load_network(force_download=False)
 router.load_data(
-    points_file="data/raw/rea_1000m.geojson",
+    points_file="data/raw/rea_1000m_v2.geojson",
     vectors_file="data/raw/rea_1000m_vectors_v2.json"
 )
 router.precompute_nearest_nodes()
@@ -452,9 +452,8 @@ for corridor_key, edges in corridor_groups.items():
         props["corridor_bearing_bin"] = corridor_key[2]
 
         # Final congestion is a blend of smoothed and corridor congestion
-        # You can adjust this blend ratio as needed
-        SMOOTH_WEIGHT = 0.5
-        CORRIDOR_WEIGHT = 0.5
+        SMOOTH_WEIGHT = 1.0
+        CORRIDOR_WEIGHT = 0.0
         
         props["congestion_final"] = (
             props["congestion_smooth"] * SMOOTH_WEIGHT + 

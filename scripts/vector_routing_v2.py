@@ -330,7 +330,7 @@ def main():
     
     # Load data
     router.load_data(
-        points_file="data/raw/rea_1000m.geojson",
+        points_file="data/raw/rea_1000m_v2.geojson",
         vectors_file="data/raw/rea_1000m_vectors_v2.json"
     )
 

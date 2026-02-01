@@ -25,7 +25,13 @@ Approximated using a combination of:
     - GHSL built-up non-residential volume
     - VIIRS night-time light intensity
 - **Amenity Intensity**<br>
-Derived from Overture Maps Foundation POIs, representing non-work destinations such as retail, services, leisure, and social activities.
+Overture Maps Foundation POIs, disaggregated into purpose-specific layers: <br>
+    - Residential-level intensities: leisure, essential services, and HBNW commercial (department stores, salons, barbershops)
+    - Non-home-based intensities: NHB commercial (cafés, coffee shops) and places of worship<br>
+    
+    These are then grouped into two composite measures used downstream in trip distribution:
+    - amenity_hbnw — aggregates leisure, essential services, and HBNW commercial
+    - amenity_nhb — aggregates NHB commercial and places of worship
 
 These layers form the spatial basis for trip generation across different trip purposes.
 
@@ -34,9 +40,9 @@ Travel demand is decomposed into three OD matrices, each representing a distinct
 1. **Home-Based Work (HBW)**<br>
 Residential → employment-driven trips
 2. **Home-Based Non-Work (HBNW)**<br>
-Residential → amenity-driven trips
+Residential → amenity (hbnw) driven trips
 3. **Non-Home-Based (NHB)**<br>
-Trips not anchored at home (e.g., work → amenity, amenity → amenity)
+Trips not anchored at home, drawn to amenity_nhb destinations (NHB commercial, places of worship)
 
 Each OD matrix is further adjusted using time-of-day weights, allowing demand composition to shift between peak and off-peak conditions. <br>
 The final demand matrix is obtained by a weighted combination of all trip types.
@@ -45,9 +51,10 @@ The final demand matrix is obtained by a weighted combination of all trip types.
 Trips between grid cells `i` and `j` are generated using gravity models, with distinct distance-decay parameters per trip type. <br>
 
 **General form:** <br>
-$$
+$
 T_{ij}^{(p)} = k_p \frac{O_i^{\alpha_p} D_j^{\beta_p}}{d_{ij}^{\gamma_p}}
-$$<br>
+$ 
+<br>
 **Where**:
 - $T_{ij}^{(p)}$ = number of trips from zone $i$ to zone $j$ for trip purpose $p$
 - $p \in {\text{HBW}, \text{HBNW}, \text{NHB}}$
@@ -74,10 +81,11 @@ An Origin-Destination (OD) matrix containing estimated trip volumes between all 
     - Routing costs are updated iteratively as congestion evolves
 
 ### E. Congestion Modeling
-Congestion is modeled using a Bureau of Public Roads (BPR) function:
-$$
+Congestion is modeled using a Bureau of Public Roads (BPR) function: <br>
+$
 t = t_0 \left( 1 + \alpha \left( \frac{v}{c} \right)^{\beta} \right)
-$$
+$
+<br>
 Where: <br>
 - $t$ = congested travel time
 - $t_0$ = free-flow travel time
@@ -123,10 +131,10 @@ Additionally, static figures can be found at ```data/figures```
 - **Core Libraries** : pandas, numpy, geopandas, osmnx, scipy
 - **Data Sourcers**:
     - [WorldPop](https://www.worldpop.org/)
-    - [GHSL (European Commission)](https://human-settlement.emergency.copernicus.eu/)
+    - [GHSL](https://human-settlement.emergency.copernicus.eu/) ©  European Commission
     - [VIIRS Nighttime Lights (Earth Observation Group)](https://eogdata.mines.edu/products/vnl/)
     - [Overture Maps](https://overturemaps.org/)
-    - [OpenStreetMap](https://www.openstreetmap.org/about) © OpenStreetMap contributors
+    - [OpenStreetMap](https://www.openstreetmap.org/about)
 - **Basemap & Rendering**: [MapLibre GL JS](https://maplibre.org/) with styles hosted by [MapTiler](https://www.maptiler.com/)<br>
  © MapTiler © OpenStreetMap contributors.
 

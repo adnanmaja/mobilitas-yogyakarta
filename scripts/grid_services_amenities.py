@@ -13,7 +13,14 @@ CELL_SIZE = 1000  # meters
 CRS_PROJECTED = 32749  # UTM 49S
 CRS_GEOGRAPHIC = 4326  # WGS84
 DATA_PATH = 'data/raw/Overture/cropped_filtered_overture.geojson'
-OUTPUT_PATH = 'data/figures/amenity_1000m.png'
+PLOT_OUTPUT_PATH = 'data/figures/amenity_1000m.png'
+
+# might want to rethink this, bcs intensity are from how many buildings are there in a grid, not how big
+WORSHIP_SCALE = 'log1p'  # Whatever is closer mindset
+COMMERCIAL_NHB_SCALE = 'sqrt' # Closer is better (why bother going to shopping mall when theres lunch in the nearby street vendors)
+COMMERCIAL_HBNW_SCALE = 'linear' # Bigger spot attracts more people (they have more to offer)
+LEISURE_SCALE = 'linear' # Bigger spot attracts more people
+SERVICE_SCALE = 'sqrt' # Linear's so skewed (few grid at 70 - 100 intensity, while the rest at 25 - 30)
 
 
 def create_grid(boundary_gdf, cell_size=1000):
@@ -40,7 +47,7 @@ def create_grid(boundary_gdf, cell_size=1000):
     return grid
 
 
-def calculate_intensity(grid, places_gdf, intensity_column):
+def calculate_intensity(grid, places_gdf, intensity_column, scale: str):
     # Ensure same CRS
     places_projected = places_gdf.to_crs(epsg=CRS_PROJECTED)
     
@@ -57,7 +64,15 @@ def calculate_intensity(grid, places_gdf, intensity_column):
     grid = grid.merge(counts, on='cell_id', how='left')
     grid[intensity_column] = grid['count'].fillna(0)
     grid = grid.drop(columns=['count'])
-    
+
+    scale = scale.lower()
+    if scale == 'sqrt':
+        grid[intensity_column] = np.sqrt(grid[intensity_column])
+    elif scale == 'log1p': 
+        grid[intensity_column] = np.log1p(grid[intensity_column])
+    else:
+        grid[intensity_column] = grid[intensity_column]
+
     # Normalize to 0-100 scale
     max_count = grid[intensity_column].max()
     if max_count > 0:
@@ -95,7 +110,7 @@ def analyze_place_of_worship(grid):
     worship_places = load_overture_data(worship_categories, "places of worship")
     
     if worship_places is not None:
-        grid = calculate_intensity(grid, worship_places, 'place_of_worship_intensity')
+        grid = calculate_intensity(grid, worship_places, 'place_of_worship_intensity', scale=WORSHIP_SCALE)
     else:
         grid['place_of_worship_intensity'] = 0
     
@@ -127,7 +142,7 @@ def analyze_commercial_nhb(grid):
     commercial_places = load_overture_data(commercial_categories, "commercial places (Non Home Based)")
     
     if commercial_places is not None:
-        grid = calculate_intensity(grid, commercial_places, 'commercial_intensity_nhb')
+        grid = calculate_intensity(grid, commercial_places, 'commercial_intensity_nhb', scale=COMMERCIAL_NHB_SCALE) 
     else:
         grid['commercial_intensity_nhb'] = 0
     
@@ -177,7 +192,7 @@ def analyze_commercial_hbnw(grid):
     commercial_places = load_overture_data(commercial_categories, "commercial places (Home Based Non Work)")
     
     if commercial_places is not None:
-        grid = calculate_intensity(grid, commercial_places, 'commercial_intensity_hbnw')
+        grid = calculate_intensity(grid, commercial_places, 'commercial_intensity_hbnw', scale=COMMERCIAL_HBNW_SCALE)
     else:
         grid['commercial_intensity_hbnw'] = 0
     
@@ -228,7 +243,7 @@ def analyze_leisure(grid):
     leisure_places = load_overture_data(leisure_categories, "leisure places")
     
     if leisure_places is not None:
-        grid = calculate_intensity(grid, leisure_places, 'leisure_intensity')
+        grid = calculate_intensity(grid, leisure_places, 'leisure_intensity', scale=LEISURE_SCALE)
     else:
         grid['leisure_intensity'] = 0
     
@@ -252,9 +267,33 @@ def analyze_services(grid):
     service_places = load_overture_data(service_categories, "service places")
     
     if service_places is not None:
-        grid = calculate_intensity(grid, service_places, 'service_intensity')
+        grid = calculate_intensity(grid, service_places, 'service_intensity', scale=SERVICE_SCALE)
     else:
         grid['service_intensity'] = 0
+    
+    return grid
+
+def combine_intensities(grid):
+    print("\n=== Combining Intensities ===")
+    
+    # NHB (Non-Home Based): commercial NHB + worship
+    grid['amenity_nhb_intensity'] = grid['commercial_intensity_nhb'] + grid['place_of_worship_intensity']
+    
+    # HBNW (Home-Based Non-Work): commercial HBNW + leisure + service
+    grid['amenity_hbnw_intensity'] = (
+        grid['commercial_intensity_hbnw'] + 
+        grid['leisure_intensity'] + 
+        grid['service_intensity']
+    )
+    
+    # Normalize each to 0-100 scale
+    for col in ['amenity_nhb_intensity', 'amenity_hbnw_intensity']:
+        max_val = grid[col].max()
+        if max_val > 0:
+            grid[col] = (grid[col] / max_val) * 100
+    
+    print(f"amenity_nhb_intensity range: {grid['amenity_nhb_intensity'].min():.1f} to {grid['amenity_nhb_intensity'].max():.1f}")
+    print(f"amenity_hbnw_intensity range: {grid['amenity_hbnw_intensity'].min():.1f} to {grid['amenity_hbnw_intensity'].max():.1f}")
     
     return grid
 
@@ -262,64 +301,52 @@ def analyze_services(grid):
 def plot_results(grid, boundary):
     boundary = boundary.to_crs(epsg=CRS_PROJECTED)
 
-    fig, axes = plt.subplots(2, 3, figsize=(18, 12)) 
+    fig, axes = plt.subplots(2, 4, figsize=(22, 12)) 
     
-    # Plot worship intensity
-    boundary.boundary.plot(ax=axes[0, 0], color='black', linewidth=1, alpha=0.5)
-    grid.plot(column='place_of_worship_intensity', cmap='Reds', 
-              legend=True, ax=axes[0, 0])
-    axes[0, 0].set_title('Place of Worship Intensity', fontsize=16)
-    axes[0, 0].axis('off')
+    # List of all intensity columns to plot
+    intensity_columns = [
+        ('place_of_worship_intensity', 'Place of Worship'),
+        ('commercial_intensity_nhb', 'Commercial (NHB)'),
+        ('commercial_intensity_hbnw', 'Commercial (HBNW)'),
+        ('leisure_intensity', 'Leisure'),
+        ('service_intensity', 'Services'),
+        ('amenity_nhb_intensity', 'Amenity NHB'),
+        ('amenity_hbnw_intensity', 'Amenity HBNW')
+    ]
     
-    # Plot nhb commercial intensity
-    boundary.boundary.plot(ax=axes[0, 1], color='black', linewidth=1, alpha=0.5)
-    grid.plot(column='commercial_intensity_nhb', cmap='Reds', 
-              legend=True, ax=axes[0, 1])
-    axes[0, 1].set_title('Commercial Intensity (NHB)', fontsize=16)
-    axes[0, 1].axis('off')
-
-    # Plot hbnw commercial intensity
-    boundary.boundary.plot(ax=axes[0, 2], color='black', linewidth=1, alpha=0.5)
-    grid.plot(column='commercial_intensity_hbnw', cmap='Reds', 
-              legend=True, ax=axes[0, 2])
-    axes[0, 2].set_title('Commercial Intensity (HBNW)', fontsize=16)
-    axes[0, 2].axis('off')
-
-    # Plot leisure intensity
-    boundary.boundary.plot(ax=axes[1, 0], color='black', linewidth=1, alpha=0.5)
-    grid.plot(column='leisure_intensity', cmap='Reds', 
-              legend=True, ax=axes[1, 0])
-    axes[1, 0].set_title('Leisure Intensity', fontsize=16)
-    axes[1, 0].axis('off')
-
-    # Plot service intensity
-    boundary.boundary.plot(ax=axes[1, 1], color='black', linewidth=1, alpha=0.5)
-    grid.plot(column='service_intensity', cmap='Reds', 
-              legend=True, ax=axes[1, 1])
-    axes[1, 1].set_title('Service Intensity', fontsize=16)
-    axes[1, 1].axis('off')
+    # Plot each intensity
+    for idx, (col_name, title) in enumerate(intensity_columns):
+        row = idx // 4
+        col = idx % 4
+        
+        # Plot boundary
+        boundary.boundary.plot(ax=axes[row, col], color='black', linewidth=1, alpha=0.5)
+        
+        # Plot intensity
+        grid.plot(column=col_name, cmap='Reds', 
+                  legend=True, ax=axes[row, col])
+        
+        axes[row, col].set_title(title, fontsize=14)
+        axes[row, col].axis('off')
     
-    axes[1, 2].axis('off')
+    # Hide the empty subplot
+    axes[1, 3].axis('off')
     
     plt.tight_layout()
-    plt.savefig(OUTPUT_PATH, dpi=300, bbox_inches='tight')
+    plt.savefig(PLOT_OUTPUT_PATH, dpi=300, bbox_inches='tight')
     plt.show()
-    print(f"\nFigure saved to '{OUTPUT_PATH}'")
-
+    print(f"\nFigure saved to '{PLOT_OUTPUT_PATH}'")
 
 def print_statistics(grid):
     print("\n=== STATISTICS ===")
     print(f"Total grid cells: {len(grid)}")
-    print(f"Place of worship intensity range: {grid['place_of_worship_intensity'].min():.1f} - {grid['place_of_worship_intensity'].max():.1f}")
-    print(f"Commercial (NHB) intensity range: {grid['commercial_intensity_nhb'].min():.1f} - {grid['commercial_intensity_nhb'].max():.1f}")
-    print(f"Commercial (HBNW) intensity range: {grid['commercial_intensity_hbnw'].min():.1f} - {grid['commercial_intensity_hbnw'].max():.1f}")
-    print(f"Leisure intensity range: {grid['leisure_intensity'].min():.1f} - {grid['leisure_intensity'].max():.1f}")
-    print(f"Service intensity range: {grid['service_intensity'].min():.1f} - {grid['service_intensity'].max():.1f}")
     print(f"Cells with place of worship intensity > 0: {(grid['place_of_worship_intensity'] > 0).sum()}")
     print(f"Cells with commercial (NHB) intensity > 0: {(grid['commercial_intensity_nhb'] > 0).sum()}")
     print(f"Cells with commercial (HBNW) intensity > 0: {(grid['commercial_intensity_hbnw'] > 0).sum()}")
     print(f"Cells with leisure intensity > 0: {(grid['leisure_intensity'] > 0).sum()}")
     print(f"Cells with service intensity > 0: {(grid['service_intensity'] > 0).sum()}")
+    print(f"Cells with amenity_nhb_intensity > 0: {(grid['amenity_nhb_intensity'] > 0).sum()}")
+    print(f"Cells with amenity_hbnw_intensity > 0: {(grid['amenity_hbnw_intensity'] > 0).sum()}")
     
     # Top intensity cells
     top_worship = grid.nlargest(5, 'place_of_worship_intensity')[['cell_id', 'place_of_worship_intensity']]
@@ -330,17 +357,25 @@ def print_statistics(grid):
     print("\nTop 5 commercial (NHB) intensity cells:")
     print(top_commercial_nhb.to_string(index=False))
     
-    top_commercial_hbnw = grid.nlargest(5, 'commercial_intensity_hbnw')[['cell_id', 'commercial_intensity_nhb']]
+    top_commercial_hbnw = grid.nlargest(5, 'commercial_intensity_hbnw')[['cell_id', 'commercial_intensity_hbnw']]
     print("\nTop 5 commercial (HBNW) intensity cells:")
     print(top_commercial_hbnw.to_string(index=False))
 
-    top_leisure = grid.nlargest(5, 'leisure_intensity')[['cell_id', 'commercial_intensity_nhb']]
+    top_leisure = grid.nlargest(5, 'leisure_intensity')[['cell_id', 'leisure_intensity']]
     print("\nTop 5 leisure intensity cells:")
     print(top_leisure.to_string(index=False))
 
     top_service = grid.nlargest(5, 'service_intensity')[['cell_id', 'service_intensity']]
     print("\nTop 5 service intensity cells:")
     print(top_service.to_string(index=False))
+
+    top_nhb = grid.nlargest(5, 'amenity_nhb_intensity')[['cell_id', 'amenity_nhb_intensity']]
+    print("\nTop 5 amenity_nhb_intensity cells:")
+    print(top_nhb.to_string(index=False))
+    
+    top_hbnw = grid.nlargest(5, 'amenity_hbnw_intensity')[['cell_id', 'amenity_hbnw_intensity']]
+    print("\nTop 5 amenity_hbnw_intensity cells:")
+    print(top_hbnw.to_string(index=False))
 
     # Additional analysis for non-zero cells
     worship_nonzero = grid[grid['place_of_worship_intensity'] > 0]['place_of_worship_intensity']
@@ -357,14 +392,20 @@ def print_statistics(grid):
 
     leisure_nonzero = grid[grid['leisure_intensity'] > 0]['leisure_intensity']
     if len(leisure_nonzero) > 0:
-        print(f"\nAverage leisure intensity (non-zero cells): {leisure_nonzero.mean():.2f}")
+        print(f"Average leisure intensity (non-zero cells): {leisure_nonzero.mean():.2f}")
 
     service_nonzero = grid[grid['service_intensity'] > 0]['service_intensity']
     if len(service_nonzero) > 0:
-        print(f"\nAverage service intensity (non-zero cells): {service_nonzero.mean():.2f}")
+        print(f"Average service intensity (non-zero cells): {service_nonzero.mean():.2f}")
 
+    # Some more
+    print(f"Place of worship scale: {WORSHIP_SCALE}")
+    print(f"Commercial (NHB) scale: {COMMERCIAL_NHB_SCALE}")
+    print(f"Commercial (HBNW) scale: {COMMERCIAL_HBNW_SCALE}")
+    print(f"leisure scale: {LEISURE_SCALE}")
+    print(f"Service scale: {SERVICE_SCALE}")
 
-def export_to_geojson(grid, output_path='data/raw/amenity_grid_1000m.geojson'):
+def export_to_geojson(grid, output_path='data/raw/services_amenities_1000m.geojson'):
     export_gdf = grid.copy()
     export_gdf['geometry'] = export_gdf.geometry.centroid
     export_gdf = export_gdf.to_crs(epsg=CRS_GEOGRAPHIC)
@@ -387,6 +428,7 @@ def main():
     grid = analyze_commercial_hbnw(grid)
     grid = analyze_leisure(grid)
     grid = analyze_services(grid)
+    grid = combine_intensities(grid)
     
     # Visualize
     plot_results(grid, boundary)
@@ -394,7 +436,7 @@ def main():
     # Statistics
     print_statistics(grid)
     
-    # export_to_geojson(grid)
+    export_to_geojson(grid)
     
 
 if __name__ == "__main__":

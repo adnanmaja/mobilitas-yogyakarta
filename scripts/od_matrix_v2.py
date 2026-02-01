@@ -388,31 +388,35 @@ def main():
         coordinates = np.column_stack([gdf.geometry.x.values, gdf.geometry.y.values])
         
         # Find intensity columns
-        residential_cols = [col for col in gdf.columns if 'residential_intensity_norm' in col.lower()]
-        employment_cols = [col for col in gdf.columns if 'employment_edu_intensity_norm' in col.lower()]
-        amenity_cols = [col for col in gdf.columns if 'amenity_intensity_norm' in col.lower()]
+        residential_cols = [col for col in gdf.columns if 'residential_intensity' in col.lower()]
+        employment_cols = [col for col in gdf.columns if 'employment_intensity' in col.lower()]
+        amenity_hbnw_cols = [col for col in gdf.columns if 'amenity_hbnw_intensity' in col.lower()]
+        amenity_nhb_cols = [col for col in gdf.columns if 'amenity_nhb_intensity' in col.lower()]
         id_cols = [col for col in gdf.columns if 'id' in col.lower()]
         
         residential = gdf[residential_cols[0]].values if residential_cols else np.ones(len(gdf))
         employment = gdf[employment_cols[0]].values if employment_cols else np.ones(len(gdf))
-        amenity = gdf[amenity_cols[0]].values if amenity_cols else np.ones(len(gdf))
+        amenity_hbnw = gdf[amenity_hbnw_cols[0]].values if amenity_hbnw_cols else np.ones(len(gdf))
+        amenity_nhb = gdf[amenity_nhb_cols[0]].values if amenity_nhb_cols else np.ones(len(gdf))
         grid_ids = gdf[id_cols[0]].values if id_cols else np.arange(len(gdf))
         
         # Normalize to sum to 1 for IPF
         residential = residential / residential.sum() 
         employment = employment / employment.sum() 
-        amenity = amenity / amenity.sum() 
-        
+        amenity_hbnw = amenity_hbnw / amenity_hbnw.sum() 
+        amenity_nhb = amenity_nhb/ amenity_nhb.sum() 
+
         print(f"  Loaded {len(gdf)} grid cells")
         print(f"  Residential sum: {residential.sum():.1f}")
         print(f"  Employment sum: {employment.sum():.1f}")
-        print(f"  Amenity sum: {amenity.sum():.1f}")
+        print(f"  Amenity (HBNW) sum: {amenity_hbnw.sum():.1f}")
+        print(f"  Amenity (NHB) sum: {amenity_nhb.sum():.1f}")
         
-        return residential, employment, amenity, coordinates, grid_ids, gdf
+        return residential, employment, amenity_hbnw, amenity_nhb, coordinates, grid_ids, gdf
     
     # Load your data
-    residential, employment, amenity, coordinates, grid_ids, gdf = load_data(
-        'data/raw/rea_1000m.geojson'
+    residential, employment,  amenity_hbnw, amenity_nhb, coordinates, grid_ids, gdf = load_data(
+        'data/raw/rea_1000m_v2.geojson'
     )
     
     # Initialize model
@@ -424,9 +428,9 @@ def main():
     
     # Step 1: Define total trip ratios per purpose
     # (Devi et al., 2019)
-    total_trips_hbw = 62.38   
-    total_trips_hbnw = 27.77   
-    total_trips_nhb = 9.86      
+    total_trips_hbw = 623.8   
+    total_trips_hbnw = 277.7   
+    total_trips_nhb = 98.6      
     
     # Step 2-4: Calculate each trip purpose with IPF
     od_matrices = {}
@@ -438,7 +442,7 @@ def main():
         distance_matrix=distance_matrix,
         purpose_name="HBW",
         purpose_params={
-            'gamma': 1.3,        # Fine with longer trip
+            'gamma': 1.2,        # Fine with longer trip
             'total_trips': total_trips_hbw,
             'alpha': 1.0,
             'beta': 1.0
@@ -450,11 +454,11 @@ def main():
     # HBNW: Home-Based Non-Work (Residential -> Amenity)
     od_hbnw = model.calculate_trip_purpose(
         productions=residential,
-        attractions=amenity,
+        attractions=amenity_hbnw,
         distance_matrix=distance_matrix,
         purpose_name="HBNW",
         purpose_params={
-            'gamma': 4,        # Prefer spots that's closer to home
+            'gamma': 3.5,        # Prefer spots that's closer to home
             'total_trips': total_trips_hbnw,
             'alpha': 1.0,
             'beta': 1.0
@@ -466,11 +470,11 @@ def main():
     # NHB: Non-Home-Based (Employment -> Amenity)
     od_nhb = model.calculate_trip_purpose(
         productions=employment,
-        attractions=amenity,
+        attractions=amenity_nhb,
         distance_matrix=distance_matrix,
         purpose_name="NHB",
         purpose_params={
-            'gamma': 3,        # Much prefer shorter destinations
+            'gamma': 3.5,        # Much prefer shorter destinations
             'total_trips': total_trips_nhb,
             'alpha': 1.0,
             'beta': 1.0

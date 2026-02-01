@@ -188,15 +188,15 @@ grid.plot(column='combined_intensity', cmap='viridis', legend=True, ax=axes[2])
 axes[2].set_title('Combined Intensity (sqrt(GHSL) * sqrt(VIIRS))', fontsize=14)
 
 plt.tight_layout()
-plt.savefig('data/figures/employment_combined_1000m.png', dpi=300, bbox_inches='tight')
+plt.savefig('data/figures/employment_1000m.png', dpi=300, bbox_inches='tight')
 plt.show()
 
 # Save data to geojson
 export_gdf = grid.copy()
 export_gdf['geometry'] = export_gdf.geometry.centroid
 export_gdf = export_gdf.to_crs(epsg=4326)  # To match mapbox's system
-export_gdf.to_file('data/raw/employment_combined_1000m.geojson', driver='GeoJSON')
-print("Data saved to 'data/raw/employment_combined_1000m.geojson'")
+export_gdf.to_file('data/raw/employment_1000m.geojson', driver='GeoJSON')
+print("Data saved to 'data/raw/employment_1000m.geojson'")
 
 # Print statistics
 print("\n=== STATISTICS ===")
