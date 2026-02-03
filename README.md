@@ -30,8 +30,8 @@ Overture Maps Foundation POIs, disaggregated into purpose-specific layers: <br>
     - Non-home-based intensities: NHB commercial (cafés, coffee shops) and places of worship<br>
     
     These are then grouped into two composite measures used downstream in trip distribution:
-    - amenity_hbnw — aggregates leisure, essential services, and HBNW commercial
-    - amenity_nhb — aggregates NHB commercial and places of worship
+    - `amenity_hbnw`: aggregates leisure, essential services, and HBNW commercial
+    - `amenity_nhb`: aggregates NHB commercial and places of worship
 
 These layers form the spatial basis for trip generation across different trip purposes.
 
@@ -50,10 +50,13 @@ The final demand matrix is obtained by a weighted combination of all trip types.
 ### C. Trip Distribution: Purpose-Specific Gravity Models
 Trips between grid cells `i` and `j` are generated using gravity models, with distinct distance-decay parameters per trip type. <br>
 
-**General form:** <br>
-$T_{ij}^{(p)} = k_p \frac{O_i^{\alpha_p} D_j^{\beta_p}}{d_{ij}^{\gamma_p}}$ 
+General form: <br>
+```math
+T_{ij}^{(p)} = k_p \frac{O_i^{\alpha_p} D_j^{\beta_p}}{d_{ij}^{\gamma_p}}
+```
 <br>
-**Where**:
+Where:
+
 - $T_{ij}^{(p)}$ = number of trips from zone $i$ to zone $j$ for trip purpose $p$
 - $p \in {\text{HBW}, \text{HBNW}, \text{NHB}}$
 - $O_i$ = origin intensity of zone $i$
@@ -75,14 +78,18 @@ An Origin-Destination (OD) matrix containing estimated trip volumes between all 
 - **Routing** : Each OD pair's trip volume is assigned to a path on the network using Dijkstra's shortest-path algorithm
 - **Initial Cost** : Free-flow travel time, adjusted by relative road class capacity
 - **Assignment Method** : 
-    - OD flows are distributed across multiple shortest paths (top-k routing)
-    - Routing costs are updated iteratively as congestion evolves
+    - **Destination sampling**: To maintain computational tractability, only top-k destinations per distance band are routed from each origin
+    - **Mode-specific routing**: Cars and motorbikes are routed separately with different road type preferences
+    - **Static assignment**: Initial routing does not incorporate congestion feedback (see section F for congestion iteration)
 
 ### E. Congestion Modeling
 Congestion is modeled using a Bureau of Public Roads (BPR) function: <br>
-$t = t_0 \left( 1 + \alpha \left( \frac{v}{c} \right)^{\beta} \right)$
+```math
+t = t_0 \left( 1 + \alpha \left( \frac{v}{c} \right)^{\beta} \right)
+```
 <br>
 Where: <br>
+
 - $t$ = congested travel time
 - $t_0$ = free-flow travel time
 - $v$ = traffic volume on the segment or corridor
@@ -110,8 +117,79 @@ The model implements a static iterative assignment, introducing feedback between
 
 This captures first-order congestion feedback without full dynamic traffic simulation.
 
+### G. Mode Choice & Multi-Class Traffic Assignment
+To better reflect observed travel behavior in Yogyakarta, the model extends beyond a single homogeneous traffic stream by explicitly representing mode choice and multi-class traffic flow, focusing on cars and motorbikes (with public transport planned for future iterations).
 
-## Results & Vsiualization
+#### G.1 Purpose-Preserving Mode Choice
+Rather than collapsing all trips into a single OD matrix prior to assignment, trip purposes are preserved through the mode choice stage:
+- Home-Based Work (HBW)
+- Home-Based Non-Work (HBNW)
+- Non-Home-Based (NHB)
+For each purpose-specific OD matrix, trips are split into modes based primarily on trip distance, reflecting empirically observed behavior in Indonesian cities (e.g., motorbike dominance for short–medium trips, higher car usage for longer HBW trips). <br>
+
+After mode splitting, OD matrices are recombined by mode:
+- `OD_car`
+- `OD_motorbike`
+
+Trip purposes are not carried further into the assignment stage.
+
+#### G.2 Destination Sampling with Distance Stratification
+To maintain computational tractability, OD assignment does not load all destination pairs. However, rather than truncating destinations solely by trip volume, the model applies a distance-stratified destination sampling scheme:
+
+For each origin and mode:
+- Destinations are divided into three distance bands:
+    - Near (≤ ~3 km)
+    - Medium (~3–8 km)
+    - Far (> ~8 km)
+- Within each band, destinations are ranked by OD flow magnitude 
+- A fixed number of destinations is retained per band (e.g., 10 per band)
+
+#### G.3 Mode-Specific Network Accessibility
+Cars and motorbikes are routed on the same street network, but with mode-specific road type weights: <br>
+
+- Cars are preferentially routed onto higher-class roads (primary, secondary)
+- Motorbikes are less constrained by road hierarchy and can utilize narrower streets and local shortcuts unavailable or unattractive to cars
+
+#### G.4 Shared Congestion with Passenger Car Units (PCU)
+Congestion is modeled as a shared physical state of the roadway, rather than separately per mode. <br>
+Traffic volumes are converted into an effective flow using Passenger Car Units (PCU): <br>
+```math
+v_{\text{eff}} = 1.0 \cdot v_{\text{car}} + \phi \cdot v_{\text{motorbike}}
+```
+<br>
+Where:
+
+- $v_{\text{eff}}$ : effective traffic volume used for congestion calculation (in Passenger Car Units)
+- $v_{\text{car}}$ : assigned car traffic volume on a network segment
+- $v_{\text{motorbike}}$ : assigned motorbike traffic volume on a network segment
+- $\phi$ : motorbike passenger car unit (PCU) factor, representing relative road space consumption compared to a car
+
+#### G.5 Mode-Specific Congestion Response 
+Congested travel times are updated using BPR-style functions with mode-specific parameters, allowing motorbikes to remain competitive even under high traffic volumes.
+
+```math
+t_m = t_0 \left( 1 + \alpha_m \left( \frac{v_{\text{eff}}}{c} \right)^{\beta_m} \right)
+```
+<br>
+Where:
+
+- $t_m$ : congested travel time experienced by mode $m$
+- $t_0$ : free-flow travel time
+- $c$ : effective road capacity
+- $\alpha_m, \beta_m$ : mode-specific congestion sensitivity parameters
+While congestion is computed from the shared effective flow, experienced travel times differ by mode:
+- Cars experience full congestion effects
+- Motorbikes experience reduced delay due to filtering, queue bypassing, and maneuverability 
+
+#### G.6 Iterative Multi-Class Assignment
+The assignment process is implemented as a static iterative loop:
+1. Route car OD flows using car travel times
+2. Route motorbike OD flows using motorbike travel times
+3. Aggregate flows into effective congestion volumes
+4. Update mode-specific travel times
+5. Repeat until convergence
+
+## Results & Visualization
 The resulting data have been visualized into an interactive map using maplibre. [Check it out!](https://adnanmaja.github.io/mobilitas-yogyakarta) <br>
 Additionally, static figures can be found at ```data/figures```
 
