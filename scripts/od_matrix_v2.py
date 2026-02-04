@@ -241,7 +241,7 @@ class ImprovedGravityModel:
                              weights: Dict[str, float]) -> np.ndarray:
         """
         Combine multiple OD matrices with weights
-        
+        (Uncalled)
         Parameters:
         -----------
         od_matrices: Dictionary with purpose_name -> OD matrix
@@ -468,7 +468,7 @@ class ImprovedGravityModel:
     def save_sparse_vectors(self, od_matrix: np.ndarray,
                            grid_ids: np.ndarray,
                            filename: str,
-                           threshold: float = 1e-7):
+                           threshold: float = 1e-6):
         """
         Save OD matrix as sparse vectors to JSON file
         
@@ -787,17 +787,40 @@ def main():
     od_matrices['NHB'] = od_nhb
     avg_nhb_distance = model.calculate_average_distance(od_nhb, distance_matrix, "NHB")
     model.plot_od_heatmap(gdf, od_nhb, title="NHB Trip Origins", output_file="nhb_trip_origins.png")
-    
+
+    print(f"\n{'='*60}")
+    print("Applying Time-of-Day Weights")
+    print(f"{'='*60}")
+
+    # Time-of-day weights (AM peak)
+    time_of_day_factors = {
+        'HBW': 0.25,    # 25% of HBW trips in AM peak
+        'HBNW': 0.15,   # 15% of HBNW trips in AM peak
+        'NHB': 0.10,    # 10% of NHB trips in AM peak
+    }
+        
     # Apply mode choice
     mode_od_matrices = {}
 
     for purpose_name, od_matrix in od_matrices.items():
+        print(f"Time-of-day weighting for {purpose_name}")
+        
+        # Get time-of-day factor
+        tod_factor = time_of_day_factors.get(purpose_name, 1.0)
+        print(f"  Time-of-day factor (AM peak): {tod_factor:.2%}")
+        
+        # Apply time-of-day weighting
+        od_matrix_tod = od_matrix * tod_factor
+        print(f"  Before weighting: {od_matrix.sum():.0f} trips")
+        print(f"  After weighting: {od_matrix_tod.sum():.0f} trips")
+        print(f"  Reduction: {1 - tod_factor:.1%}")
+        
         print(f"\n{'='*60}")
         print(f"Mode choice for {purpose_name}")
         print(f"{'='*60}")
 
         purpose_modes = model.apply_mode_choice_chunked(
-            od_matrix=od_matrix,
+            od_matrix=od_matrix_tod,  # Use time-weighted matrix
             distance_matrix=distance_matrix,
             purpose=purpose_name
         )

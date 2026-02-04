@@ -74,13 +74,48 @@ Distance-decay values are calibrated using findings from (Devi et al., 2019), re
 An Origin-Destination (OD) matrix containing estimated trip volumes between all grid pairs.
 
 ### D. Route Assignment & Network Handling
-- **Road Network** : OpenStreetMap route network via ``osmnx``
-- **Routing** : Each OD pair's trip volume is assigned to a path on the network using Dijkstra's shortest-path algorithm
-- **Initial Cost** : Free-flow travel time, adjusted by relative road class capacity
-- **Assignment Method** : 
-    - **Destination sampling**: To maintain computational tractability, only top-k destinations per distance band are routed from each origin
-    - **Mode-specific routing**: Cars and motorbikes are routed separately with different road type preferences
-    - **Static assignment**: Initial routing does not incorporate congestion feedback (see section F for congestion iteration)
+**Road Network** <br>
+OpenStreetMap route network via ``osmnx``
+
+**Routing** <br>
+Each OD pair's trip volume is assigned to a path on the network using Dijkstra's shortest-path algorithm
+
+**Initial Cost** <br> 
+Free-flow generalized cost defined as road length multiplied by a mode- and road-class-specific constant. During routing, this base cost is augmented by stochastic perception noise and turn penalties as described above.
+
+**Behavioral Route Choice Adjustments** <br>
+- **Perception Noise (Stochastic Cost Perturbation)**<br>
+    To avoid deterministic shortest-path collapse—where all trips select a single identical route due to perfectly perceived costs—the model introduces small stochastic perturbations to edge costs during routing.
+    <br>
+    For each origin–destination (OD) routing instance, base edge costs are perturbed as:
+
+    ```math
+    w_e' = w_e \left( 1 + \varepsilon_e \right), \qquad \varepsilon_e \sim \mathcal{U}(-\delta_m, +\delta_m) 
+    ```
+
+    Where:<br>
+    - $w_e$ is the base edge cost (road-length multiplied by a mode and road-class-specific constant),
+    - $\delta_m$ is a mode-specific perception noise parameter.
+
+- **Turn Penalties at Intersections**<br>
+    To better represent intersection delay and maneuvering friction, an additional cost is applied to turning movements during routing. When consecutive edges are non-collinear, a fixed turn penalty is added to the perceived travel cost.
+
+    This discourages unrealistic zig-zag routing and helps preserve through-movement continuity on major arterials, where in reality drivers tend to remain on the same corridor unless a clear advantage exists. Turn penalties are mode-specific and applied during shortest-path computation.
+
+**Assignment Method:** <br>
+- **Destination sampling**<br>
+To maintain computational tractability, the model does not route all possible origin–destination (OD) pairs. Instead, for each origin zone and distance band (near, medium, far), a limited number of destinations are selected for routing. <br><br>
+Unlike a deterministic “top-k” approach, destinations are sampled probabilistically, with selection probabilities proportional to their gravity-model trip weights. This preserves the dominance of highly attractive destinations while avoiding winner-take-all artifacts in sparse regional contexts.<br><br>
+The number of sampled destinations per distance band is fixed:
+    - Near: 12
+    - Medium: 8
+    - Far: 4
+
+- **Mode-specific routing**: Cars and motorbikes are routed separately with different road type preferences
+- **Static assignment**: Initial routing does not incorporate congestion feedback (see section F for congestion iteration)
+
+**Destination Sampling Strategy**<br>
+
 
 ### E. Congestion Modeling
 Congestion is modeled using a Bureau of Public Roads (BPR) function: <br>

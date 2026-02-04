@@ -43,7 +43,7 @@ class CongestionFeedbackLoop:
         }
         
         # Default capacity if road type not found
-        self.default_capacity = 300
+        self.default_capacity = 1.5
         
         # Convergence threshold
         self.convergence_threshold = 0.01
@@ -210,13 +210,16 @@ class CongestionFeedbackLoop:
             Updated edges with new travel times
         """
         updated_edges = []
+
+        debug_count = 0
+        max_debug = 4
         
-        for edge in edges:
+        for i, edge in enumerate(edges):
             props = edge['properties']
             
             # Get current flows
             car_flow = props.get('car_flow', 0)
-            motorbike_flow = props.get('motorbike_flow', 0)
+            motorbike_flow = props.get('motorbike_flow', 0) 
             
             # Calculate effective volume
             effective_volume = self.calculate_effective_volume(car_flow, motorbike_flow)
@@ -224,6 +227,16 @@ class CongestionFeedbackLoop:
             # Get free-flow time and capacity
             free_flow_time = self.calculate_free_flow_time(edge)
             capacity = self.get_road_capacity(edge)
+
+            if debug_count < max_debug:
+                print(f"\n= DEBUG1 Edge {i}")
+                print(f"car_flow: {car_flow}")
+                print(f"motorbike_flow: {motorbike_flow}")
+                print(f"effective_volume: {effective_volume}")
+                print(f"free_flow_time: {free_flow_time}")
+                print(f"capacity: {capacity}")
+                debug_count += 1
+                
             
             # Calculate congested travel times for each mode
             car_alpha = self.bpr_params['car']['alpha']
@@ -335,6 +348,11 @@ class CongestionFeedbackLoop:
             Edges with re-routed flows
         """
         print("  Re-routing based on updated travel times...")
+
+        print(f"  DEBUG: Initial edge_flows count: {len(routing_module.edge_flows)}")
+        if routing_module.edge_flows:
+            sample_key = list(routing_module.edge_flows.keys())[0]
+            print(f"  DEBUG: Sample flow before clear: {routing_module.edge_flows[sample_key]}")
         
         # Save current congestion state to temporary file
         temp_geojson = "temp_congestion.geojson"
@@ -351,31 +369,81 @@ class CongestionFeedbackLoop:
         routing_module.rebuild_sparse_graphs()
         
         # Clear previous flows
+        old_flows = routing_module.edge_flows.copy()
         routing_module.edge_flows.clear()
+        print(f"  DEBUG: Cleared {len(old_flows)} flows")
         
-        # Re-route (this will take time - consider caching or incremental updates)
+        # Re-route
         print("  Re-routing car trips...")
         routing_module.process_car()
+        print(f"  DEBUG: After process_car, edge_flows count: {len(routing_module.edge_flows)}")
         
         print("  Re-routing motorbike trips...")
         routing_module.process_motorbike()
-        
+        print(f"  DEBUG: After process_motorbike, edge_flows count: {len(routing_module.edge_flows)}")
+
+        flow_lookup = {}
+        for (edge_u, edge_v, edge_id), flows in routing_module.edge_flows.items():
+            if edge_id is not None:
+                flow_lookup[edge_id] = {
+                    'car_flow': flows.get('car_flow', 0),
+                    'motorbike_flow': flows.get('motorbike_flow', 0)
+                }
+            else:
+                # Fallback to (u, v) if no edge_id
+                flow_lookup[(edge_u, edge_v)] = {
+                    'car_flow': flows.get('car_flow', 0),
+                    'motorbike_flow': flows.get('motorbike_flow', 0)
+                }
+            
         # Get updated edge flows
+        debug_count = 0
+        max_debug = 5
+
+        sample_keys = list(routing_module.edge_flows.keys())[:5]
+        print(f"\n  DEBUG: Sample edge_flows keys: {sample_keys}")
+        print(f"  DEBUG: Total edge_flows: {len(routing_module.edge_flows)}")
+
         updated_edges = []
-        for edge in edges:
+        for i, edge in enumerate(edges):
             props = edge['properties']
             u = props.get('u')
             v = props.get('v')
+            edge_id = props.get('id') or props.get('edge_id') or props.get('osmid')
             
-            # Find matching flow in routing module
-            car_flow = 0
-            motorbike_flow = 0
-            
-            for (edge_u, edge_v, _), flows in routing_module.edge_flows.items():
-                if edge_u == u and edge_v == v:
-                    car_flow = flows.get('car_flow', 0)
-                    motorbike_flow = flows.get('motorbike_flow', 0)
-                    break
+            flows = {'car_flow': 0, 'motorbike_flow': 0}
+
+            # Try to find matching flow by checking all possible keys
+            found = False
+            if u is not None and v is not None:
+                # Try different key values (0, 1, 2, etc. for multi-edges)
+                for key_val in [0, 1, 2, edge_id]:  # Include edge_id as potential key
+                    edge_key = (u, v, key_val)
+                    if edge_key in routing_module.edge_flows:
+                        flows = routing_module.edge_flows[edge_key]
+                        found = True
+                        if debug_count < max_debug:
+                            print(f"  Found with key_val={key_val}: {flows}")
+                        break
+                
+                # If not found, maybe it's using a different key format
+                if not found:
+                    # Check all keys that match (u, v) regardless of third element
+                    matching_keys = [k for k in routing_module.edge_flows.keys() 
+                                if k[0] == u and k[1] == v]
+                    if matching_keys:
+                        # Take the first matching key
+                        flows = routing_module.edge_flows[matching_keys[0]]
+                        found = True
+                        if debug_count < max_debug:
+                            print(f"  Found among {len(matching_keys)} matching keys: {flows}")
+                            
+            if flows is None and u is not None and v is not None:
+                flows = flow_lookup.get((u, v))
+            if flows is None and u is not None and v is not None and edge_id is not None:
+                flows = flow_lookup.get((u, v, edge_id))
+            car_flow = flows['car_flow']
+            motorbike_flow = flows['motorbike_flow']
             
             # Update properties
             updated_props = props.copy()
@@ -386,6 +454,13 @@ class CongestionFeedbackLoop:
             updated_edge = edge.copy()
             updated_edge['properties'] = updated_props
             updated_edges.append(updated_edge)
+
+            if debug_count <= max_debug:
+                print(f"\n= [DEBUG][ADJUST] Edge {i}")
+                print(f"car_flow: {car_flow}")
+                print(f"motorbike_flow: {motorbike_flow}")
+                debug_count += 1
+                
         
         # Clean up temp file
         if os.path.exists(temp_geojson):

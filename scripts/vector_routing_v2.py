@@ -1,8 +1,8 @@
 import os
 import json
 import logging
-import pandas as pd
-import math
+import numpy as np
+from geopy.distance import geodesic
 import osmnx as ox
 from tqdm import tqdm
 from shapely.geometry import Point, LineString
@@ -29,57 +29,7 @@ class VectorRouter:
         self.flow_lock = Lock()
         os.makedirs(cache_dir, exist_ok=True)
 
-    # Debugging
-    def debug_edge_matching(self, geojson_path: str):
-        """
-        Debug why edges aren't matching between GeoJSON and OSM graph.
-        """
-        with open(geojson_path, 'r') as f:
-            geojson_data = json.load(f)
-        
-        print(f"\n{'='*60}")
-        print("EDGE MATCHING DEBUG")
-        print('='*60)
-        
-        # Count edges in GeoJSON
-        geojson_edges = []
-        for feature in geojson_data['features']:
-            props = feature['properties']
-            u = props.get('u')
-            v = props.get('v')
-            geojson_edges.append((u, v))
-        
-        print(f"GeoJSON edges: {len(geojson_edges)}")
-        print(f"OSM graph edges: {len(self.graph.edges)}")
-        
-        # Check if (u, v) properties exist
-        edges_with_uv = sum(1 for (u, v) in geojson_edges if u is not None and v is not None)
-        print(f"GeoJSON edges with (u,v): {edges_with_uv}/{len(geojson_edges)}")
-        
-        # Check a few sample edges
-        print("\nSample GeoJSON edges (first 5):")
-        for u, v in geojson_edges[:5]:
-            print(f"  ({u}, {v})")
-        
-        # Check if these nodes exist in OSM graph
-        print("\nChecking if sample nodes exist in OSM graph:")
-        for u, v in geojson_edges[:5]:
-            u_in_graph = u in self.graph.nodes
-            v_in_graph = v in self.graph.nodes
-            print(f"  ({u}, {v}) -> u exists: {u_in_graph}, v exists: {v_in_graph}")
-            
-            if u_in_graph and v_in_graph:
-                # Check if edge exists
-                edge_exists = self.graph.has_edge(u, v)
-                print(f"    Edge exists in graph: {edge_exists}")
-                if edge_exists:
-                    print(f"    Edge data keys: {list(self.graph[u][v].keys())}")
-        
-        # Check projection
-        print(f"\nGraph CRS: {self.graph.graph.get('crs')}")
-        print(f"Graph projected: {'projected' in self.graph.graph}")
-        
-        return geojson_edges
+        np.random.seed(67)
 
     def add_impedance(self, vehicle_type="car"):
         # Road weights for different vehicle types
@@ -115,23 +65,66 @@ class VectorRouter:
                 'pedestrian': 10.0,    # Avoid but possible
             }
         }
-        
+
+        # Noise parameters: Uniform(-δ, +δ)
+        NOISE_DELTA = {
+            'car': 0.01,      # ±1% noise for cars
+            'motorbike': 0.03 # ±3% noise for motorbikes
+        }
+
+        TURN_PENALTY_MULTIPLIERS = {
+            'car': 1.0,      # Standard turn penalties
+            'motorbike': 0.6  # Motorbikes handle turns better
+        }
+
+        BASE_SPEEDS = {
+            'car': 13.89,      # 50 km/h
+            'motorbike': 11.11  # 40 km/h (more conservative for safety)
+        }
+            
         vehicle_weights = ROAD_WEIGHTS.get(vehicle_type, ROAD_WEIGHTS['car'])
+        delta = NOISE_DELTA.get(vehicle_type, 0.01)
+        turn_multiplier = TURN_PENALTY_MULTIPLIERS.get(vehicle_type, 1.0)
+        base_speed = BASE_SPEEDS.get(vehicle_type, 13.89)
         
         for u, v, data in self.graph.edges(data=True):
+            # Get base travel time from OSMnx (includes turn penalties)
+            base_time = data.get('travel_time', 0)
+
+            # Adjust turn penalty component
+            # We can estimate it by comparing to straight-line time
             length = data.get('length', 0)
-            highway = data.get('highway', 'residential')
+            straight_time = length / base_speed
             
+            # If actual time is longer, it includes turn penalties
+            turn_penalty = max(0, base_time - straight_time)
+            
+            # Apply vehicle-specific adjustment to turn penalty only
+            adjusted_turn_penalty = turn_penalty * turn_multiplier
+            adjusted_time = straight_time + adjusted_turn_penalty
+            
+            # Apply road type multiplier
+            highway = data.get('highway', 'residential')
             if isinstance(highway, list):
                 highway = highway[0]
             
-            # Get penalty multiplier for this vehicle type
             penalty = vehicle_weights.get(highway, 2.0)
+
+            # Add uniform noise: ε ~ Uniform(-δ, +δ)
+            epsilon = np.random.uniform(-delta, delta)
             
+            impedance_noisy = adjusted_time * penalty * (1 + epsilon)
+            impedance_noisy = max(impedance_noisy, adjusted_time * penalty * 0.001)
+
             # Store different impedance values for different vehicles
             if 'impedance' not in data or not isinstance(data['impedance'], dict):
                 data['impedance'] = {}
-            data['impedance'][vehicle_type] = length * penalty
+            
+            # Store both noisy and clean impedance for comparison/debugging
+            data['impedance'][vehicle_type] = impedance_noisy
+            data['impedance'][f'{vehicle_type}_clean'] = base_time * penalty
+            data['impedance'][f'{vehicle_type}_base_time'] = base_time  
+
 
     def update_impedances_from_congestion(self, congestion_geojson_path: str):
         """
@@ -216,6 +209,10 @@ class VectorRouter:
         else:
             logger.info(f"Downloading OSM data for {self.place_name}...")
             self.graph = ox.graph_from_place(self.place_name, network_type='drive', simplify=False)
+
+            # Add travel times with turn penalties
+            self.graph = ox.add_edge_travel_times(self.graph)
+
             with open(cache_file, 'wb') as f:
                 pickle.dump(self.graph, f)
             logger.info(f"Cached to {cache_file}")
@@ -255,70 +252,113 @@ class VectorRouter:
         
         # Distance band thresholds (km)
         if vehicle_type == "car":
-            NEAR_THRESH = 5.0   # km
-            MED_THRESH = 13.0   # km
+            NEAR_THRESH = 5.0
+            MED_THRESH = 13.0
         else:  # motorbike
-            NEAR_THRESH = 3.0   # km
-            MED_THRESH = 10.0   # km
+            NEAR_THRESH = 3.0
+            MED_THRESH = 10.0
         
         # Top k per band
-        K_NEAR = 10
-        K_MED = 10
-        K_FAR = 10
-        
-        # You might need access to points for distance calculation
-        # If points aren't available here, you'll need to pass them
-        # or restructure the loading logic
+        K_NEAR = 13
+        K_MED = 9
+        K_FAR = 5
         
         vectors_by_origin = {}
+        
+        # Precompute all point coordinates once
+        point_coords = {
+            pid: (self.points[pid]['lat'], self.points[pid]['lon'])
+            for pid in self.points
+        }
         
         with open(vectors_file, 'rb') as f:
             for item in ijson.items(f, 'item'):
                 origin_id = item['origin_id']
-                origin_lat = self.points[origin_id]['lat']
-                origin_lon = self.points[origin_id]['lon']
+                origin_coords = point_coords[origin_id]
                 
-                # We need to calculate distances and group by bands
-                near_dests = []
-                med_dests = []
-                far_dests = []
+                # Batch process destinations
+                dests = item['destinations']
+                if not dests:
+                    continue
                 
-                for dest in item['destinations']:
+                # Extract data in batches
+                dest_ids = []
+                trips_list = []
+                dest_coords_list = []
+                
+                for dest in dests:
                     dest_id = dest['destination_id']
                     trips = dest['trips']
                     
-                    # Skip if no trips
                     if trips <= 0:
                         continue
                     
-                    # Calculate distance (Haversine or simple Euclidean approximation)
-                    dest_lat = self.points[dest_id]['lat']
-                    dest_lon = self.points[dest_id]['lon']
+                    dest_ids.append(dest_id)
+                    trips_list.append(trips)
+                    dest_coords_list.append(point_coords[dest_id])
+                
+                if not dest_ids:
+                    continue
+                
+                # Vectorized distance calculation
+                distances_km = []
+                for dest_coord in dest_coords_list:
+                    distances_km.append(geodesic(origin_coords, dest_coord).km)
+                
+                # Use numpy arrays for faster operations
+                dest_ids_arr = np.array(dest_ids)
+                trips_arr = np.array(trips_list, dtype=np.float32)
+                distances_arr = np.array(distances_km, dtype=np.float32)
+                
+                # Create masks for each band
+                near_mask = distances_arr <= NEAR_THRESH
+                med_mask = (distances_arr > NEAR_THRESH) & (distances_arr <= MED_THRESH)
+                far_mask = distances_arr > MED_THRESH
+                
+                # Sample from each band
+                sampled_dests = []
+                
+                for mask, k in [(near_mask, K_NEAR), (med_mask, K_MED), (far_mask, K_FAR)]:
+                    band_dest_ids = dest_ids_arr[mask]
+                    band_trips = trips_arr[mask]
                     
-                    # Simple Euclidean approximation (for small distances)
-                    # For more accurate distances, use geopy or calculate haversine
-                    dlat = dest_lat - origin_lat
-                    dlon = dest_lon - origin_lon
-                    distance_km = math.sqrt(dlat**2 + dlon**2) * 111  # approx km per degree
+                    if len(band_dest_ids) == 0 or k <= 0:
+                        continue
                     
-                    # Categorize by distance band
-                    if distance_km <= NEAR_THRESH:
-                        near_dests.append({'destination_id': dest_id, 'trips': trips, 'distance': distance_km})
-                    elif distance_km <= MED_THRESH:
-                        med_dests.append({'destination_id': dest_id, 'trips': trips, 'distance': distance_km})
-                    else:
-                        far_dests.append({'destination_id': dest_id, 'trips': trips, 'distance': distance_km})
+                    # Limit k
+                    k = min(k, len(band_dest_ids))
+                    
+                    # Probabilistic sampling
+                    if len(band_dest_ids) > 0:
+                        probs = band_trips / band_trips.sum()
+                        try:
+                            sampled_indices = np.random.choice(
+                                len(band_dest_ids),
+                                size=k,
+                                replace=False,
+                                p=probs
+                            )
+                            
+                            for idx in sampled_indices:
+                                sampled_dests.append({
+                                    'destination_id': band_dest_ids[idx],
+                                    'trips': float(band_trips[idx])
+                                })
+                        except ValueError:
+                            # Fallback to uniform sampling if probabilities fail
+                            sampled_indices = np.random.choice(
+                                len(band_dest_ids),
+                                size=min(k, len(band_dest_ids)),
+                                replace=False
+                            )
+                            for idx in sampled_indices:
+                                sampled_dests.append({
+                                    'destination_id': band_dest_ids[idx],
+                                    'trips': float(band_trips[idx])
+                                })
                 
-                # Sort each band by trips (descending) and take top k
-                near_dests = sorted(near_dests, key=lambda d: d['trips'], reverse=True)[:K_NEAR]
-                med_dests = sorted(med_dests, key=lambda d: d['trips'], reverse=True)[:K_MED]
-                far_dests = sorted(far_dests, key=lambda d: d['trips'], reverse=True)[:K_FAR]
-                
-                # Union all bands
-                all_dests = near_dests + med_dests + far_dests
-                
-                if all_dests:
-                    vectors_by_origin[origin_id] = all_dests
+                if sampled_dests:
+                    vectors_by_origin[origin_id] = sampled_dests
         
         return vectors_by_origin
 
@@ -381,7 +421,12 @@ class VectorRouter:
             if dest_node is None:
                 continue
             
-            dest_idx = self.node_to_idx[dest_node]
+            dest_osm_node = self.point_to_node.get(dest_id)  # Get OSM node for destination cell
+            if not dest_osm_node:
+                continue
+            dest_idx = self.node_to_idx.get(dest_osm_node)  # Now get the sparse graph index
+            if dest_idx is None:
+                continue
             
             if predecessors[dest_idx] == -9999:
                 continue

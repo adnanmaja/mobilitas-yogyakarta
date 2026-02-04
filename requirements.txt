@@ -22,8 +22,10 @@ filelock==3.20.3
 folium==0.20.0
 fonttools==4.61.1
 gdown==5.2.1
+geographiclib==2.1
 geojson==3.2.0
 geopandas==1.1.2
+geopy==2.4.1
 idna==3.11
 ijson==3.4.0.post0
 ipyevents==2.0.4
@@ -52,6 +54,7 @@ narwhals==2.15.0
 networkx==3.6.1
 numpy==2.4.1
 osmnx==2.0.7
+overturemaps==0.18.0
 packaging==25.0
 pandas==2.3.3
 parso==0.8.5
@@ -60,6 +63,7 @@ plotly==6.5.2
 prompt_toolkit==3.0.52
 psygnal==0.15.1
 pure_eval==0.2.3
+pyarrow==23.0.0
 pydantic==2.12.5
 pydantic_core==2.41.5
 Pygments==2.19.2
