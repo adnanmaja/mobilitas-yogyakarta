@@ -70,6 +70,13 @@ Where:
 
 Distance-decay values are calibrated using findings from (Devi et al., 2019), reflecting observed differences in trip-length tolerance across purposes (e.g., work trips tolerate longer distances than discretionary trips).
 
+**Boundary Effects and External Trip Leakage** <br>
+The DIY administrative boundary does not represent a closed travel system. In early iterations, the absence of destinations outside the modeled area led to artificial concentration of long-distance trips at boundary-adjacent zones and excessive loading of radial corridors.
+
+To mitigate this edge effect, the model introduces external trip leakage near the study-area boundary. Grid cells within a 3 km buffer of the boundary probabilistically leak a fraction of generated trips to an implicit external system. Leakage rates are purpose-specific, with higher leakage for Home-Based Work (HBW) trips and lower leakage for discretionary travel.
+
+This approach does not model specific external destinations but serves as a boundary condition that prevents unrealistic accumulation of demand at the study edge while preserving internal spatial structure.
+
 **Output** <br>
 An Origin-Destination (OD) matrix containing estimated trip volumes between all grid pairs.
 
@@ -137,10 +144,7 @@ Key extensions:
 Capacities are defined in relative terms (e.g., primary > secondary > tertiary), rather than absolute veh/hr.
 - **Utilization Ratios by Trip Type**<br>
 Different trip purposes contribute differently to effective congestion.
-- **Spatial Smoothing**<br>
-Congestion is smoothed across neighboring edges to reduce artificial discontinuities and better represent spillback effects.
-- **Corridor-Level Congestion**<br>
-Congestion is aggregated and applied at corridor scale rather than strictly per-edge, improving network realism.
+
 
 ### F. Congestion Feedback Loop
 The model implements a static iterative assignment, introducing feedback between congestion and routing:
@@ -257,3 +261,5 @@ Additionally, static figures can be found at ```data/figures```
 ## Acknowledgements
 Devi, M. K., et al. (2019). Travel Behavior Pattern in Yogyakarta Urbanized Area. Proceedings of the Eastern Asia Society for Transportation Studies, 12.
 https://www.researchgate.net/publication/338865315
+
+BPS "Provinsi Daerah Istimewa Yogyakarta Dalam Angka 2025"

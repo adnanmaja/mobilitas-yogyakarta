@@ -5,10 +5,90 @@ import time
 from typing import Tuple, List, Dict, Optional
 import geopandas as gpd
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 from matplotlib.colors import LogNorm
+from tools.to_parquet import JsonToParquet
+import gc
 import warnings
 warnings.filterwarnings('ignore')
+
+# Note: also check out
+# Ansusanto, J. Dwijoko. “Karakteristik Pola Perjalanan Di Perkotaan (Studi Kasus Kota Yogyakarta).” Simposium FSTPT XVI, UMS.
+# Risdiyanto, Risdiyanto & Munawar, Ahmad & Irawan, Muhammad & Nugraha, A. (2020). Model selection of online motorcycle taxi and motorcycle modes on work trips. IOP Conference Series: Materials Science and Engineering. 1007. 012059. 10.1088/1757-899X/1007/1/012059. 
+# Dharmowijoyo, Dimas & Susilo, Yusak & Karlström, Anders. (2015). Day-to-day variability in travellers’ activity-travel patterns in the Jakarta metropolitan area. Transportation. 43. 10.1007/s11116-015-9591-4. 
+# Ansusanto, Dwijoko. (2016). POLA PERJALANAN DI PERKOTAAN YOGYAKARTA. Jurnal Teknik Sipil. 12. 10.24002/jts.v12i4.633. 
+
+# Mode Shares Per Distance, uncalibrated 
+#  - Short (<3km)
+SHORT_DISTANCE_THRES = 3 
+SHORT_MOTORBIKE_SHARES = 0.90
+SHORT_CAR_SHARES = 0.10
+#  - Medium (3km - 10km)
+MEDIUM_DISTANCE_THERS = 10
+MEDIUM_MOTORBIKE_SHARES = 0.60
+MEDIUM_CAR_SHARES = 0.40
+#  - Long (10km - 15km)
+LONG_DISTANCE_THRES = 15
+LONG_MOTORBIKE_SHARES = 0.50
+LONG_CAR_SHARES = 0.50
+#  - Very long (>15km)
+VERY_LONG_MOTORBIKE_SHARES = 0.40
+VERY_LONG_CAR_SHARES = 0.60
+
+# Mode Shares per Trip Purposes
+# BPS "Provinsi Daerah Istimewa Yogyakarta Dalam Angka 2025"
+# Total motor di DIY = 2,929,766 (87%); Mobil = 449,913 (13)%
+
+#  - Work trips
+HBW_MOTORBIKE_SHARES = 1.2
+HBW_CAR_SHARES = 0.8
+# - More motorbike for non-work trips
+HBNW_MOTORBIKE_SHARES = 1.4
+HBNW_CAR_SHARES = 0.6
+# - Alot more motorbike for non-home-based
+NHB_MOTORBIKE_SHARES = 1.8
+NHB_CAR_SHARES = 0.2
+
+# Total Trip Ratio Per Purposes, (Devi et al., 2019)
+# 1156 trips as baseline 
+HBW_TOTAL_TRIPS = 71105.56 # 1156 * (46.11 + 15.40)/100 = 711.0556
+HBNW_TOTAL_TRIPS = 30298.76 # 1156 * (26.21)/100 = 302.9876
+NHB_TOTAL_TRIPS = 13201.52 # 1156 * (6.06 + 1.21 + 1.47 + 1.12 + 1.56)/100 = 132.0152
+
+# Gravity Model Params 
+# gamma is the distance decay factor
+GAMMA_HBW = 0.9   # 10 - 13km avg, fine with longer trip
+ALPHA_HBW = 1.0
+BETA_HBW = 1.0
+
+GAMMA_HBNW = 3.5  # 6 - 9km avg, prefer closer spots
+ALPHA_HBNW = 1.0
+BETA_HBNW = 1.0
+
+GAMMA_NHB = 3.5   # 1 - 4km avg, much prefer shorter destinations
+ALPHA_NHB = 1.0
+BETA_NHB = 1.0
+
+# Time of Day factors (Right now its AM peak)
+TOD_HBW = 1  
+TOD_HBNW = 0.15
+TOD_NHB = 0.05
+
+# Scaling factor (To populate v/c if needed)
+OD_SCALING_FACTOR = 1
+
+# IPF
+IPF_ITERATIONS = 15
+IPF_TOLERANCE = 1e-6
+
+# Boundary leakage (to simulate traffic going out of DIY)
+BOUNDARY_BUFFER = 3.0 # km
+LEAKAGE_HBW = 0.30
+LEAKAGE_HBNW = 0.10
+LEAKAGE_NHB = 0.05
+
+# Data files
+DIY_BOUNDARY = 'data/raw/Yogyakarta.geojson'
+GRID_DATA = 'data/raw/rea_1000m_v2.geojson'
 
 class ImprovedGravityModel:
     """
@@ -86,15 +166,13 @@ class ImprovedGravityModel:
     def ipf_balancing(self,
                      od_matrix: np.ndarray,
                      productions: np.ndarray,
-                     attractions: np.ndarray,
-                     max_iterations: int = 15,
-                     tolerance: float = 1e-6) -> np.ndarray:
+                     attractions: np.ndarray) -> np.ndarray:
         """
         Iterative Proportional Fitting (Furness method) to balance OD matrix
         
         Ensures: sum_j T_ij = P_i and sum_i T_ij = A_j
         """
-        print(f"  IPF balancing (max {max_iterations} iterations)...")
+        print(f"  IPF balancing (max {IPF_ITERATIONS} iterations)...")
         
         n = len(productions)
         T = od_matrix.copy()
@@ -103,7 +181,7 @@ class ImprovedGravityModel:
         row_factors = np.ones(n)
         col_factors = np.ones(n)
         
-        for iteration in range(max_iterations):
+        for iteration in range(IPF_ITERATIONS):
             # Row balancing (match productions)
             row_sums = T.sum(axis=1)
             row_sums[row_sums == 0] = 1  # Avoid division by zero
@@ -126,7 +204,7 @@ class ImprovedGravityModel:
             if iteration % 5 == 0:
                 print(f"    Iteration {iteration}: error = {total_error:.6f}")
             
-            if total_error < tolerance:
+            if total_error < IPF_TOLERANCE:
                 print(f"  IPF converged after {iteration + 1} iterations")
                 break
         
@@ -227,9 +305,6 @@ class ImprovedGravityModel:
             print(f"Target total: {target_total:.1f}")
             print(f"Actual total: {actual_total:.1f}")
             print(f"Difference: {difference:.1f} ({relative_error:.2%})")
-            
-            if relative_error > 0.01:  # More than 1% error
-                print(f"Warning: Significant deviation from target!")
 
         # Calculate statistics
         self._calculate_statistics(T_balanced, productions, attractions, purpose_name)
@@ -302,20 +377,10 @@ class ImprovedGravityModel:
         print(f"    Attraction error (MAE): {attr_error:.3%}")
 
     def calculate_average_distance(self, od_matrix: np.ndarray, 
-                                distance_matrix: np.ndarray,
-                                purpose_name: str) -> float:
+                                    distance_matrix: np.ndarray,
+                                    purpose_name: str) -> float:
         """
-        Calculate weighted average trip distance for a given OD matrix
-        
-        Parameters:
-        -----------
-        od_matrix: OD matrix with trip counts
-        distance_matrix: Distance matrix (same shape as od_matrix)
-        purpose_name: Name of trip purpose for printing
-        
-        Returns:
-        --------
-        Weighted average distance in same units as distance_matrix
+        Calculate weighted average and median trip distance for a given OD matrix
         """
         # Create masks for non-zero trips
         non_zero_mask = od_matrix > 0
@@ -333,14 +398,48 @@ class ImprovedGravityModel:
         
         average_distance = weighted_sum / total_trips if total_trips > 0 else 0.0
         
-        print(f"\n  Average {purpose_name} trip distance: {average_distance:.2f} meters")
+        # Calculate weighted median using numpy's percentile with weights
+        normalized_trips = trips / total_trips
+        
+        # Sort both arrays by distance
+        sorted_indices = np.argsort(distances)
+        sorted_distances = distances[sorted_indices]
+        sorted_weights = normalized_trips[sorted_indices]
+        
+        # Calculate cumulative weights
+        cumulative_weights = np.cumsum(sorted_weights)
+        
+        # Find the median using linear interpolation
+        # Find index where cumulative weight crosses 0.5
+        idx = np.searchsorted(cumulative_weights, 0.5)
+        
+        if idx == 0:
+            median_distance = sorted_distances[0]
+        elif idx >= len(sorted_distances):
+            median_distance = sorted_distances[-1]
+        else:
+            # Linear interpolation between adjacent values
+            weight_before = cumulative_weights[idx - 1]
+            weight_at = cumulative_weights[idx]
+            
+            # Interpolate between the two distances
+            if weight_at - weight_before > 1e-10:  # Avoid division by zero
+                fraction = (0.5 - weight_before) / (weight_at - weight_before)
+                median_distance = sorted_distances[idx - 1] + fraction * (
+                    sorted_distances[idx] - sorted_distances[idx - 1])
+            else:
+                median_distance = sorted_distances[idx]
+        
+        print(f"\n  {purpose_name} trip distances:")
+        print(f"    Average: {average_distance:.2f} meters")
+        print(f"    Median:  {median_distance:.2f} meters")
         
         return average_distance
     
     def apply_mode_choice_chunked(self, od_matrix: np.ndarray, 
                                 distance_matrix: np.ndarray,
                                 purpose: str,
-                                chunk_size: int = 1000) -> Dict[str, np.ndarray]:
+                                chunk_size: int = 500) -> Dict[str, np.ndarray]:
         """
         Apply rule-based mode choice splitting with chunked processing
         
@@ -379,6 +478,7 @@ class ImprovedGravityModel:
                 distance_matrix=dist_chunk,
                 purpose=purpose
             )
+            gc.collect()
             
             # Apply shares to OD chunk and store results
             for mode in ['motorbike', 'car']:
@@ -415,22 +515,21 @@ class ImprovedGravityModel:
         }
         
         # Calculate base shares by distance
-        mask_short = d_km < 3
-        # mode_shares['walk'][mask_short] = 0.20
-        mode_shares['motorbike'][mask_short] = 0.90
-        mode_shares['car'][mask_short] = 0.10
+        mask_short = d_km < SHORT_DISTANCE_THRES
+        mode_shares['motorbike'][mask_short] = SHORT_MOTORBIKE_SHARES
+        mode_shares['car'][mask_short] = SHORT_CAR_SHARES
         
-        mask_medium = (d_km >= 3) & (d_km < 10)
-        mode_shares['motorbike'][mask_medium] = 0.60
-        mode_shares['car'][mask_medium] = 0.40
+        mask_medium = (d_km >= SHORT_DISTANCE_THRES) & (d_km < MEDIUM_DISTANCE_THERS)
+        mode_shares['motorbike'][mask_medium] = MEDIUM_MOTORBIKE_SHARES
+        mode_shares['car'][mask_medium] = MEDIUM_CAR_SHARES
         
-        mask_long = (d_km >= 10) & (d_km < 15)
-        mode_shares['motorbike'][mask_long] = 0.50
-        mode_shares['car'][mask_long] = 0.50
+        mask_long = (d_km >= MEDIUM_DISTANCE_THERS) & (d_km < LONG_DISTANCE_THRES)
+        mode_shares['motorbike'][mask_long] = LONG_MOTORBIKE_SHARES
+        mode_shares['car'][mask_long] = LONG_CAR_SHARES
         
-        mask_very_long = d_km >= 15
-        mode_shares['motorbike'][mask_very_long] = 0.40
-        mode_shares['car'][mask_very_long] = 0.60
+        mask_very_long = d_km >= LONG_DISTANCE_THRES
+        mode_shares['motorbike'][mask_very_long] = VERY_LONG_MOTORBIKE_SHARES
+        mode_shares['car'][mask_very_long] = VERY_LONG_CAR_SHARES
         
         # Apply purpose-based adjustments
         self._apply_purpose_adjustments(mode_shares, purpose)
@@ -450,19 +549,16 @@ class ImprovedGravityModel:
         """Apply purpose-specific adjustments to mode shares"""
         if purpose == 'HBW':
             # More car for work trips
-            # mode_shares['walk'] *= 0.9
-            mode_shares['motorbike'] *= 0.8
-            mode_shares['car'] *= 1.2
+            mode_shares['motorbike'] *= HBW_MOTORBIKE_SHARES
+            mode_shares['car'] *= HBW_CAR_SHARES
         elif purpose == 'HBNW':
             # More motorbike for non-work trips
-            # mode_shares['walk'] *= 1.0
-            mode_shares['motorbike'] *= 1.2
-            mode_shares['car'] *= 0.9
+            mode_shares['motorbike'] *= HBNW_MOTORBIKE_SHARES
+            mode_shares['car'] *= HBNW_CAR_SHARES
         elif purpose == 'NHB':
             # More walk + motorbike for non-home-based
-            # mode_shares['walk'] *= 1.3
-            mode_shares['motorbike'] *= 1.1
-            mode_shares['car'] *= 0.8
+            mode_shares['motorbike'] *= NHB_MOTORBIKE_SHARES
+            mode_shares['car'] *= NHB_CAR_SHARES
             
     
     def save_sparse_vectors(self, od_matrix: np.ndarray,
@@ -663,12 +759,15 @@ class ImprovedGravityModel:
         
         print(f"  Saved detailed plot to {output_file}")    
 
-# Main execution
-def main():
-    print("Gravity model n IPF balancing")
-    print("=" * 60)
-    
-    def load_data(filepath: str):
+def scale_matrix_in_chunks(matrix, scaling_factor, chunk_size=1000):
+    """Scale a matrix in chunks to reduce memory usage"""
+    n = matrix.shape[0]
+    for i in range(0, n, chunk_size):
+        end_i = min(i + chunk_size, n)
+        matrix[i:end_i, :] = matrix[i:end_i, :] * scaling_factor
+    return matrix
+
+def load_data(filepath: str):
         print(f"\nLoading data from {filepath}...")
         gdf = gpd.read_file(filepath)
         
@@ -716,10 +815,111 @@ def main():
         print(f"Y min/max: {coordinates[:, 1].min():.0f} / {coordinates[:, 1].max():.0f}")
         
         return residential, employment, amenity_hbnw, amenity_nhb, coordinates, grid_ids, gdf
+
+# Add this function after the ImprovedGravityModel class but before main()
+def apply_boundary_leakage(gdf, od_matrices, distance_matrix, boundary_buffer_km=2.0, 
+                          leakage_factors=None):
+    """
+    Apply boundary leakage to OD matrices
     
-    residential, employment,  amenity_hbnw, amenity_nhb, coordinates, grid_ids, gdf = load_data(
-        'data/raw/rea_1000m_v2.geojson'
-    )
+    Parameters:
+    -----------
+    gdf : GeoDataFrame
+        Grid data with geometry
+    od_matrices : dict
+        Dictionary of OD matrices by purpose
+    distance_matrix : np.ndarray
+        Distance matrix in meters
+    boundary_buffer_km : float
+        Buffer distance from boundary in kilometers
+    leakage_factors : dict
+        Dictionary of leakage factors by purpose
+        
+    Returns:
+    --------
+    dict : Modified OD matrices with leakage applied
+    float : Total leaked trips
+    """
+
+    try:
+        diy_boundary = gpd.read_file(DIY_BOUNDARY)
+        diy_boundary = diy_boundary.to_crs(gdf.crs)
+        
+        # Create buffer around boundary
+        buffer_distance = boundary_buffer_km * 1000  # Convert to meters
+        boundary_buffer = diy_boundary.buffer(-buffer_distance)  # Negative buffer = inside
+        
+        # Identify zones near boundary
+        gdf_copy = gdf.copy()
+        near_boundary = gdf_copy.geometry.intersects(boundary_buffer.unary_union)
+        boundary_zone_indices = np.where(near_boundary)[0]
+        
+        print(f"\n{'='*60}")
+        print("BOUNDARY LEAKAGE ANALYSIS")
+        print(f"{'='*60}")
+        print(f"Boundary buffer: {boundary_buffer_km} km")
+        print(f"Zones near boundary: {len(boundary_zone_indices)}/{len(gdf)}")
+        
+        total_leaked_trips = 0
+        leaked_by_purpose = {}
+        
+        # Apply leakage to each purpose
+        for purpose, od_matrix in od_matrices.items():
+            if purpose not in leakage_factors:
+                continue
+                
+            leakage_factor = leakage_factors[purpose]
+            purpose_trips_before = od_matrix.sum()
+            
+            # Create copy to modify
+            od_matrix_leaked = od_matrix.copy()
+            
+            # Reduce trips from boundary zones
+            for zone_idx in boundary_zone_indices:
+                # Reduce all outgoing trips from this zone
+                row_sum = od_matrix_leaked[zone_idx, :].sum()
+                if row_sum > 0:
+                    reduction = row_sum * leakage_factor
+                    # Scale down all destinations proportionally
+                    scale_factor = (row_sum - reduction) / row_sum
+                    od_matrix_leaked[zone_idx, :] *= scale_factor
+            
+            # Calculate leaked trips
+            purpose_trips_after = od_matrix_leaked.sum()
+            leaked_trips = purpose_trips_before - purpose_trips_after
+            leaked_percentage = (leaked_trips / purpose_trips_before * 100) if purpose_trips_before > 0 else 0
+            
+            leaked_by_purpose[purpose] = {
+                'leaked_trips': leaked_trips,
+                'percentage': leaked_percentage,
+                'before': purpose_trips_before,
+                'after': purpose_trips_after
+            }
+            
+            total_leaked_trips += leaked_trips
+            od_matrices[purpose] = od_matrix_leaked
+            
+            print(f"\n{purpose}:")
+            print(f"  Leakage factor: {leakage_factor:.1%}")
+            print(f"  Trips before leakage: {purpose_trips_before:.0f}")
+            print(f"  Trips after leakage: {purpose_trips_after:.0f}")
+            print(f"  Leaked trips: {leaked_trips:.0f} ({leaked_percentage:.1f}%)")
+        
+        print(f"\nTotal leaked trips: {total_leaked_trips:.0f}")
+        print(f"Leakage as % of total: {total_leaked_trips/sum(m.sum() for m in od_matrices.values())*100:.1f}%")
+        
+        return od_matrices, total_leaked_trips
+        
+    except FileNotFoundError:
+        print("Warning: DIY boundary file not found")
+        return od_matrices, 0
+
+# Main execution
+def main():
+    print("Gravity model n IPF balancing")
+    print("=" * 60)
+    
+    residential, employment,  amenity_hbnw, amenity_nhb, coordinates, grid_ids, gdf = load_data(GRID_DATA)
     
     # Initialize model
     model = ImprovedGravityModel(chunk_size=500)
@@ -727,12 +927,6 @@ def main():
     # Calculate distance matrix (once, reused for all purposes)
     print("\nCalculating distance matrix...")
     distance_matrix = model.calculate_distances(coordinates)
-    
-    # Define total trip ratios per purpose
-    # (Devi et al., 2019)
-    total_trips_hbw = 623.8   
-    total_trips_hbnw = 277.7   
-    total_trips_nhb = 98.6      
     
     # Calculate each trip purpose with IPF
     od_matrices = {}
@@ -744,15 +938,16 @@ def main():
         distance_matrix=distance_matrix,
         purpose_name="HBW",
         purpose_params={
-            'gamma': 1.2,        # Fine with longer trip
-            'total_trips': total_trips_hbw,
-            'alpha': 1.0,
-            'beta': 1.0
+            'gamma': GAMMA_HBW,        
+            'total_trips': HBNW_TOTAL_TRIPS,
+            'alpha': ALPHA_HBW,
+            'beta': BETA_HBW
         }
     )
     od_matrices['HBW'] = od_hbw
     avg_hbw_distance = model.calculate_average_distance(od_hbw, distance_matrix, "HBW")
-    model.plot_od_heatmap(gdf, od_hbw, title="HBW Trip Origins", output_file="hbw_trip_origins.png")
+    model.plot_od_heatmap(gdf, od_hbw, "OD HBW", 'Tesst.png')
+    gc.collect()
     
     # HBNW: Home-Based Non-Work (Residential -> Amenity)
     od_hbnw = model.calculate_trip_purpose(
@@ -761,15 +956,18 @@ def main():
         distance_matrix=distance_matrix,
         purpose_name="HBNW",
         purpose_params={
-            'gamma': 3.5,        # Prefer spots that's closer to home
-            'total_trips': total_trips_hbnw,
-            'alpha': 1.0,
-            'beta': 1.0
+            'gamma': GAMMA_HBNW,        # Prefer spots that's closer to home
+            'total_trips': HBNW_TOTAL_TRIPS,
+            'alpha': ALPHA_HBNW,
+            'beta': BETA_HBNW
         }
     )
     od_matrices['HBNW'] = od_hbnw
     avg_hbnw_distance = model.calculate_average_distance(od_hbnw, distance_matrix, "HBNW")
-    model.plot_od_heatmap(gdf, od_hbnw, title="HBNW Trip Origins", output_file="hbnw_trip_origins.png")
+    model.plot_od_heatmap(gdf, od_hbnw, "OD HBNW", 'Tesst2.png')
+    del od_hbnw
+    gc.collect()
+    
     
     # NHB: Non-Home-Based (Employment -> Amenity)
     od_nhb = model.calculate_trip_purpose(
@@ -778,25 +976,44 @@ def main():
         distance_matrix=distance_matrix,
         purpose_name="NHB",
         purpose_params={
-            'gamma': 3.5,        # Much prefer shorter destinations
-            'total_trips': total_trips_nhb,
-            'alpha': 1.0,
-            'beta': 1.0
+            'gamma': GAMMA_HBNW,        # Much prefer shorter destinations
+            'total_trips': NHB_TOTAL_TRIPS,
+            'alpha': ALPHA_NHB,
+            'beta': BETA_NHB
         }
     )
     od_matrices['NHB'] = od_nhb
     avg_nhb_distance = model.calculate_average_distance(od_nhb, distance_matrix, "NHB")
-    model.plot_od_heatmap(gdf, od_nhb, title="NHB Trip Origins", output_file="nhb_trip_origins.png")
+    model.plot_od_heatmap(gdf, od_nhb, "OD NHB", 'Tesst3.png')
+    del od_nhb
+    gc.collect()
 
-    print(f"\n{'='*60}")
-    print("Applying Time-of-Day Weights")
-    print(f"{'='*60}")
+    # Apply boundary leakage (to simulate traffic going out of DIY)
+    print("\nApplying Boundary Leakage...")
+    
+    od_matrices, total_leaked = apply_boundary_leakage(
+        gdf=gdf,
+        od_matrices=od_matrices,  
+        distance_matrix=distance_matrix,
+        boundary_buffer_km=BOUNDARY_BUFFER,  
+        leakage_factors={
+            'HBW': LEAKAGE_HBW,    
+            'HBNW': LEAKAGE_HBNW,  
+            'NHB': LEAKAGE_NHB     
+        }
+    )
+
+    if 'od_hbnw' in locals(): del od_hbnw
+    if 'od_nhb' in locals(): del od_nhb
+    gc.collect()
+
+    print("\nApplying Time-of-Day Weights...")
 
     # Time-of-day weights (AM peak)
     time_of_day_factors = {
-        'HBW': 0.25,    # 25% of HBW trips in AM peak
-        'HBNW': 0.15,   # 15% of HBNW trips in AM peak
-        'NHB': 0.10,    # 10% of NHB trips in AM peak
+        'HBW': TOD_HBW,    
+        'HBNW': TOD_HBNW,  
+        'NHB': TOD_NHB,    
     }
         
     # Apply mode choice
@@ -820,7 +1037,7 @@ def main():
         print(f"{'='*60}")
 
         purpose_modes = model.apply_mode_choice_chunked(
-            od_matrix=od_matrix_tod,  # Use time-weighted matrix
+            od_matrix=od_matrix_tod,  
             distance_matrix=distance_matrix,
             purpose=purpose_name
         )
@@ -828,14 +1045,17 @@ def main():
         for mode, mode_matrix in purpose_modes.items():
             key = f"{purpose_name}_{mode}"
             mode_od_matrices[key] = mode_matrix
+            model.plot_od_heatmap(gdf, mode_matrix, f"{purpose_name} {mode}", f'Tesst{purpose_name}_{mode}.png')
+
+            del mode_matrix
+            gc.collect()
+
+        del od_matrix
+        gc.collect()    
 
     print(f"\n{'='*60}")
     print("Combining modes across all purposes")
     print(f"{'='*60}")
-
-    # combined_car = np.zeros_like(od_hbw)
-    # combined_motorbike = np.zeros_like(od_hbw)
-    # combined_walk = np.zeros_like(od_hbw)
 
     modes = ['car', 'motorbike']
     combined_modes = {mode: np.zeros_like(od_hbw) for mode in modes}
@@ -851,9 +1071,20 @@ def main():
     for mode, matrix in combined_modes.items():
         mode_trips = matrix.sum()
         print(f"  {mode}: {mode_trips:.0f} trips ({mode_trips/total_all_modes*100:.1f}%)")       
-        model.plot_od_heatmap(gdf, matrix, 
-                    title=f"{mode.upper()} Trip Origins", 
-                    output_file=f"{mode}_trip_origins.png")     
+    
+    for purpose in list(od_matrices.keys()):
+        del od_matrices[purpose]
+    del od_matrices
+    gc.collect()
+        
+    # Scale OD to bump up the v/c ratios later
+    print("Applying scaling factor...")
+    
+    for mode in combined_modes:
+        before = combined_modes[mode].sum()
+        combined_modes[mode] = scale_matrix_in_chunks(combined_modes[mode], OD_SCALING_FACTOR)
+        after = combined_modes[mode].sum()
+        print(f"  {mode}: {before:.0f} → {after:.0f} trips (×{OD_SCALING_FACTOR})")    
 
     
     # Save combined OD matrix
@@ -870,8 +1101,7 @@ def main():
             filename=filename
         )
 
-        avg_dist = model.calculate_average_distance(matrix, distance_matrix, f"{mode} trips")
-        print(f"  Average {mode} trip distance: {avg_dist/1000:.2f} km")
+        model.calculate_average_distance(matrix, distance_matrix, f"{mode} trips")
 
     total_avg_distance = (
         avg_hbw_distance  + 
@@ -882,15 +1112,17 @@ def main():
     print(f"\n{'='*60}")
     print("PROCESS COMPLETED!")
     print(f"{'='*60}")
-    # print(f"Total combined trips: {combined_od.sum():.0f}")
-    # print(f"Number of origins: {len(combined_od)}")
-    # print(f"Number of OD pairs: {(combined_od > 0).sum():,}")
 
     print("DISTANCES ANALYTICS")
-    print(f"Weighted average trip distance: {total_avg_distance/1000:.2f} km")
+    print(f"Weighted average trip distance: {(total_avg_distance/3)/1000:.2f} km")
     print(f"HBW average: {avg_hbw_distance/1000:.2f} km")
     print(f"HBNW average: {avg_hbnw_distance/1000:.2f} km")
     print(f"NHB average: {avg_nhb_distance/1000:.2f} km")
+
+    # Save to parquet
+    for mode in modes:
+        toparquet = JsonToParquet()
+        toparquet.convert(mode)
 
 if __name__ == "__main__":
     main()

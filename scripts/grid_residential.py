@@ -14,8 +14,12 @@ def residential_analysis():
     print("Starting Yogyakarta enhanced origin analysis...")
     
     # Get boundary of DIY
-    boundary = ox.geocode_to_gdf(place)
-    boundary = boundary.to_crs(epsg=32749)
+    boundary_gdf = gpd.read_file('data/raw/Yogyakarta.geojson')  
+
+    if boundary_gdf.crs != 'EPSG:32749':
+        boundary_gdf = boundary_gdf.to_crs(epsg=32749)
+
+    boundary = boundary_gdf
     west, south, east, north = boundary.total_bounds
     
     # Create grid
@@ -44,7 +48,7 @@ def residential_analysis():
     # RESIDENTIAL INTENSITY (from WorldPop)
     print("Getting residential intensity from WorldPop...")
     try:
-        reprojected_path = "data/raw/clipped_utm49s_2025_yogyakarta_100m.tif"
+        reprojected_path = "data/raw/Worldpop/clipped_utm49s_2025_yogyakarta_100m.tif"
         with rasterio.open(reprojected_path) as src:
             residential_scores = []
             

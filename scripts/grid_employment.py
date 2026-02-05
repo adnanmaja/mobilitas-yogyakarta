@@ -8,6 +8,8 @@ import rasterio
 from rasterio.mask import mask
 from shapely.geometry import box
 import warnings
+import json
+from shapely.geometry import shape
 warnings.filterwarnings('ignore')
 
 place = "Yogyakarta, Indonesia"
@@ -16,8 +18,12 @@ def employment_analysis():
     print("Starting Yogyakarta enhanced origin analysis...")
     
     # Get boundary of DIY
-    boundary = ox.geocode_to_gdf(place)
-    boundary = boundary.to_crs(epsg=32749)
+    boundary_gdf = gpd.read_file('data/raw/Yogyakarta.geojson')  
+
+    if boundary_gdf.crs != 'EPSG:32749':
+        boundary_gdf = boundary_gdf.to_crs(epsg=32749)
+
+    boundary = boundary_gdf
     west, south, east, north = boundary.total_bounds
     
     # Create grid
@@ -39,9 +45,9 @@ def employment_analysis():
     grid['cell_id'] = range(len(grid))
     
     # Initialize intensity scores
-    grid['employment_intensity'] = 0  # From GHSL
+    grid['ghsl_intensity'] = 0  # From GHSL
     grid['viirs_intensity'] = 0      # From VIIRS
-    grid['combined_intensity'] = 0   # Combined score
+    grid['employment_intensity'] = 0   # Combined score
     
     print(f"Created {len(grid)} grid cells")
     
@@ -63,21 +69,21 @@ def employment_analysis():
                 except:
                     employment_scores.append(0)
 
-        grid['employment_intensity'] = employment_scores
+        grid['ghsl_intensity'] = employment_scores
 
         # Square root normalization
-        grid['employment_intensity'] = np.sqrt(grid['employment_intensity'])
+        grid['ghsl_intensity'] = np.sqrt(grid['ghsl_intensity'])
 
         # Normalize to 0-100 scale
-        sqrt_max = grid['employment_intensity'].max()
-        sqrt_min = grid['employment_intensity'].min()
+        sqrt_max = grid['ghsl_intensity'].max()
+        sqrt_min = grid['ghsl_intensity'].min()
 
         if sqrt_max > sqrt_min:
-            grid['employment_intensity'] = (
-                (grid['employment_intensity'] - sqrt_min) / (sqrt_max - sqrt_min)
+            grid['ghsl_intensity'] = (
+                (grid['ghsl_intensity'] - sqrt_min) / (sqrt_max - sqrt_min)
             ) * 100
         else:
-            grid['employment_intensity'] = 0
+            grid['ghsl_intensity'] = 0
 
         print("Employment intensity assigned from GHSL")
         
@@ -91,25 +97,31 @@ def employment_analysis():
     print("Combining GHSL and VIIRS data...")
     
     # Take sqrt of normalized values and multiply
-    ghsl_norm = grid['employment_intensity'].fillna(0) / 100.0
+    ghsl_norm = grid['ghsl_intensity'].fillna(0) / 100.0
     viirs_norm = grid['viirs_intensity'].fillna(0) / 100.0
     
-    # Combined score: sqrt(GHSL) * sqrt(VIIRS)
-    combined = ghsl_norm * viirs_norm
+    # Combined score using euclidean norm
+    # combined = np.sqrt(np.square(ghsl_norm) + np.square(viirs_norm))
+
+    # Combined score using fuzzy logic / harmonic mean
+    # combined = 2 * ((ghsl_norm * viirs_norm/ghsl_norm + viirs_norm + 0.00001))
+
+    # Combined score using weighted linear
+    combined = (ghsl_norm * 0.6) + (viirs_norm * 0.4)
     
     # Log1p transformation on combined data
-    grid['combined_intensity'] = np.log1p(combined * 100)  
+    grid['employment_intensity'] = combined 
     
     # Normalize combined score to 0-100
-    combined_max = grid['combined_intensity'].max()
-    combined_min = grid['combined_intensity'].min()
+    combined_max = grid['employment_intensity'].max()
+    combined_min = grid['employment_intensity'].min()
     
     if combined_max > combined_min:
-        grid['combined_intensity'] = (
-            (grid['combined_intensity'] - combined_min) / (combined_max - combined_min)
+        grid['employment_intensity'] = (
+            (grid['employment_intensity'] - combined_min) / (combined_max - combined_min)
         ) * 100
     else:
-        grid['combined_intensity'] = 0
+        grid['employment_intensity'] = 0
     
     print("Combined intensity calculated")
     print("Analysis complete!")
@@ -174,7 +186,7 @@ fig, axes = plt.subplots(1, 3, figsize=(24, 8))
 
 # Plot 1: GHSL Employment Intensity
 boundary.boundary.plot(ax=axes[0], color='black', linewidth=1, alpha=0.5)
-grid.plot(column='employment_intensity', cmap='Reds', legend=True, ax=axes[0])
+grid.plot(column='ghsl_intensity', cmap='Reds', legend=True, ax=axes[0])
 axes[0].set_title('GHSL Employment Intensity', fontsize=14)
 
 # Plot 2: VIIRS Nighttime Lights
@@ -184,7 +196,7 @@ axes[1].set_title('VIIRS Nighttime Lights', fontsize=14)
 
 # Plot 3: Combined Intensity
 boundary.boundary.plot(ax=axes[2], color='black', linewidth=1, alpha=0.5)
-grid.plot(column='combined_intensity', cmap='viridis', legend=True, ax=axes[2])
+grid.plot(column='employment_intensity', cmap='viridis', legend=True, ax=axes[2])
 axes[2].set_title('Combined Intensity (sqrt(GHSL) * sqrt(VIIRS))', fontsize=14)
 
 plt.tight_layout()
@@ -201,19 +213,20 @@ print("Data saved to 'data/raw/employment_1000m.geojson'")
 # Print statistics
 print("\n=== STATISTICS ===")
 print(f"Total grid cells: {len(grid)}")
-print(f"GHSL intensity range: {grid['employment_intensity'].min():.1f} - {grid['employment_intensity'].max():.1f}")
+print(f"GHSL intensity range: {grid['ghsl_intensity'].min():.1f} - {grid['ghsl_intensity'].max():.1f}")
 print(f"VIIRS intensity range: {grid['viirs_intensity'].min():.1f} - {grid['viirs_intensity'].max():.1f}")
-print(f"Combined intensity range: {grid['combined_intensity'].min():.1f} - {grid['combined_intensity'].max():.1f}")
-print(f"Cells with GHSL intensity > 0: {(grid['employment_intensity'] > 0).sum()}")
+print(f"Combined intensity range: {grid['employment_intensity'].min():.1f} - {grid['employment_intensity'].max():.1f}")
+print(f"Cells with Combined intensity > 0: {(grid['employment_intensity'] > 0).sum()}")
+print(f"Cells with GHSL intensity > 0: {(grid['ghsl_intensity'] > 0).sum()}")
 print(f"Cells with VIIRS intensity > 0: {(grid['viirs_intensity'] > 0).sum()}")
 
 # Additional analysis
-categories = ['employment_intensity', 'viirs_intensity', 'combined_intensity']
+categories = ['ghsl_intensity', 'viirs_intensity', 'employment_intensity']
 for category in categories:
     top_cells = grid.nlargest(3, category)[['cell_id', category]]
     print(f"\nTop 3 {category}:")
     print(top_cells.to_string(index=False))
 
-print(f"\nAverage GHSL intensity: {grid['employment_intensity'].mean():.2f}")
+print(f"\nAverage GHSL intensity: {grid['ghsl_intensity'].mean():.2f}")
 print(f"Average VIIRS intensity: {grid['viirs_intensity'].mean():.2f}")
-print(f"Average combined intensity: {grid['combined_intensity'].mean():.2f}")
+print(f"Average combined intensity: {grid['employment_intensity'].mean():.2f}")

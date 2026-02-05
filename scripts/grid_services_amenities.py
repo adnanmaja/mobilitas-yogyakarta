@@ -24,8 +24,15 @@ SERVICE_SCALE = 'sqrt' # Linear's so skewed (few grid at 70 - 100 intensity, whi
 
 
 def create_grid(boundary_gdf, cell_size=1000):
-    boundary_projected = boundary_gdf.to_crs(epsg=CRS_PROJECTED)
-    west, south, east, north = boundary_projected.total_bounds
+    
+    # Get boundary of DIY
+    boundary_gdf = gpd.read_file('data/raw/Yogyakarta.geojson')  
+
+    if boundary_gdf.crs != 'EPSG:32749':
+        boundary_gdf = boundary_gdf.to_crs(epsg=32749)
+
+    boundary = boundary_gdf
+    west, south, east, north = boundary.total_bounds
     
     cols = np.arange(west, east, cell_size)
     rows = np.arange(south, north, cell_size)
@@ -277,13 +284,16 @@ def combine_intensities(grid):
     print("\n=== Combining Intensities ===")
     
     # NHB (Non-Home Based): commercial NHB + worship
-    grid['amenity_nhb_intensity'] = grid['commercial_intensity_nhb'] + grid['place_of_worship_intensity']
+    grid['amenity_nhb_intensity'] = (
+        (grid['commercial_intensity_nhb'] * 0.4) + 
+        (grid['place_of_worship_intensity'] * 0.6)
+    )
     
     # HBNW (Home-Based Non-Work): commercial HBNW + leisure + service
     grid['amenity_hbnw_intensity'] = (
-        grid['commercial_intensity_hbnw'] + 
-        grid['leisure_intensity'] + 
-        grid['service_intensity']
+        (grid['commercial_intensity_hbnw'] * 0.3) + 
+        (grid['leisure_intensity'] * 0.3) + 
+        (grid['service_intensity'] * 0.4)
     )
     
     # Normalize each to 0-100 scale

@@ -77,11 +77,10 @@ class FeedbackController:
 
 
 def main():
-    # Configuration
     PLACE_NAME = "Yogyakarta, Indonesia"
     POINTS_FILE = "data/raw/rea_1000m_v2.geojson"
-    CAR_VECTORS_FILE = "data/raw/rea_1000m_car_vectors_v2.json"
-    MOTORBIKE_VECTORS_FILE = "data/raw/rea_1000m_motorbike_vectors_v2.json"
+    CAR_VECTORS_FILE = "data/raw/rea_1000m_car_vectors_v2.parquet"
+    MOTORBIKE_VECTORS_FILE = "data/raw/rea_1000m_motorbike_vectors_v2.parquet"
     OUTPUT_FILE = "data/raw/rea_1000m_congestions_v4.geojson"
     
     # Run feedback loop
