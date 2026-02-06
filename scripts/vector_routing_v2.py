@@ -2,7 +2,8 @@ import os
 import json
 import logging
 import numpy as np
-import pandas as pd
+from geopy.distance import geodesic
+from scipy.spatial import cKDTree
 import osmnx as ox
 from tqdm import tqdm
 from shapely.geometry import Point, LineString
@@ -11,80 +12,12 @@ from collections import defaultdict
 from threading import Lock
 from concurrent.futures import ThreadPoolExecutor
 import ijson
+import pyarrow.parquet as pq
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import dijkstra
-import matplotlib.pyplot as plt
-from scipy import integrate
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
-# Road type penalties for different vehicle types
-ROAD_WEIGHTS = {
-    # Car weights (as before)
-    'car': {
-        'motorway': 1.0,
-        'trunk': 1.0,
-        'primary': 1.1,
-        'secondary': 1.2,
-        'tertiary': 1.3,
-        'residential': 2.0,
-        'service': 3.0,
-        'unclassified': 2.5,
-        'living_street': 4.0,  # Very slow for cars
-        'track': 5.0,          # Bad for cars
-        'path': 10.0,          # Nearly impossible for cars
-        'pedestrian': 50.0,    # Not for cars
-    },
-    # Motorbike weights - can use smaller roads more easily
-    'motorbike': {
-        'motorway': 1.0,
-        'trunk': 1.0,
-        'primary': 1.05,       # Slightly better than cars
-        'secondary': 1.1,
-        'tertiary': 1.15,
-        'residential': 1.2,    # Much better than cars
-        'service': 1.3,        # Much better than cars
-        'unclassified': 1.4,
-        'living_street': 1.5,  # Motorbikes can handle these
-        'track': 2.0,          # Can use dirt tracks
-        'path': 3.0,           # Can use paths
-        'pedestrian': 10.0,    # Avoid but possible
-    }
-}
-
-# Perception noise parameters: Uniform(-δ, +δ)
-NOISE_DELTA = {
-    'car': 0.01,      # ±1% noise for cars
-    'motorbike': 0.03 # ±3% noise for motorbikes
-}
-
-# Turn penalty, assumed
-TURN_PENALTY_MULTIPLIERS = {
-    'car': 1.0,      
-    'motorbike': 0.6 
-}
-
-# Base speed, to calculate turn penalty, uncalibrated
-BASE_SPEEDS = {
-    'car': 13.89,      # 50 km/h
-    'motorbike': 11.11  # 40 km/h (more conservative for safety)
-}
-
-# Distance band thresholds (km), assumed
-NEAR_THRESH_CAR = 5.0
-MED_THRESH_CAR = 13.0
-NEAR_THRESH_MOTORBIKE = 3.0
-MED_THRESH_MOTORBIKE = 10.0
-
-# Top k per band
-K_NEAR = 13
-K_MED = 9
-K_FAR = 5
-
-# PCU, also check the ones on od_matrix_v2.py
-CAR_PCU = 1.0
-MOTORBIKE_PCU = 0.25
 
 
 class VectorRouter:
@@ -100,7 +33,71 @@ class VectorRouter:
 
         np.random.seed(67)
 
+    def build_kdtree(self):
+        """Build KDTree for fast nearest node queries"""
+        # Extract all node coordinates
+        coords = []
+        node_ids = []
+        for node_id, data in self.graph.nodes(data=True):
+            coords.append([data['y'], data['x']])  # lat, lon
+            node_ids.append(node_id)
+        
+        self.node_coords = np.array(coords)
+        self.node_ids = np.array(node_ids)
+        self.kdtree = cKDTree(self.node_coords)
+        logger.info(f"Built KDTree with {len(node_ids)} nodes")
+
     def add_impedance(self, vehicle_type="car"):
+        # Road weights for different vehicle types
+        ROAD_WEIGHTS = {
+            # Car weights (as before)
+            'car': {
+                'motorway': 1.0,
+                'trunk': 1.0,
+                'primary': 1.1,
+                'secondary': 1.2,
+                'tertiary': 1.3,
+                'residential': 2.0,
+                'service': 3.0,
+                'unclassified': 2.5,
+                'living_street': 4.0,  # Very slow for cars
+                'track': 5.0,          # Bad for cars
+                'path': 10.0,          # Nearly impossible for cars
+                'pedestrian': 50.0,    # Not for cars
+            },
+            # Motorbike weights - can use smaller roads more easily
+            'motorbike': {
+                'motorway': 1.0,
+                'trunk': 1.0,
+                'primary': 1.05,       # Slightly better than cars
+                'secondary': 1.1,
+                'tertiary': 1.15,
+                'residential': 1.2,    # Much better than cars
+                'service': 1.3,        # Much better than cars
+                'unclassified': 1.4,
+                'living_street': 1.5,  # Motorbikes can handle these
+                'track': 2.0,          # Can use dirt tracks
+                'path': 3.0,           # Can use paths
+                'pedestrian': 10.0,    # Avoid but possible
+            }
+        }
+
+        # Noise parameters: Uniform(-δ, +δ)
+        NOISE_DELTA = {
+            'car': 0.01,      # ±1% noise for cars
+            'motorbike': 0.03 # ±3% noise for motorbikes
+        }
+
+        TURN_PENALTY_MULTIPLIERS = {
+            'car': 1.0,      # Standard turn penalties
+            'motorbike': 0.6  # Motorbikes handle turns better
+        }
+
+        BASE_SPEEDS = {
+            'car': 13.89,      # 50 km/h
+            'motorbike': 11.11  # 40 km/h (more conservative for safety)
+        }
+            
         vehicle_weights = ROAD_WEIGHTS.get(vehicle_type, ROAD_WEIGHTS['car'])
         delta = NOISE_DELTA.get(vehicle_type, 0.01)
         turn_multiplier = TURN_PENALTY_MULTIPLIERS.get(vehicle_type, 1.0)
@@ -110,7 +107,8 @@ class VectorRouter:
             # Get base travel time from OSMnx (includes turn penalties)
             base_time = data.get('travel_time', 0)
 
-            # Adjust turn penalty component, estimated by comparing to straight-line time
+            # Adjust turn penalty component
+            # We can estimate it by comparing to straight-line time
             length = data.get('length', 0)
             straight_time = length / base_speed
             
@@ -214,7 +212,8 @@ class VectorRouter:
         """Rebuild sparse graphs after impedance updates"""
         self.build_sparse_graph("car")
         self.build_sparse_graph("motorbike")
-        logger.info("Rebuilt sparse graphs with updated impedances")  
+        logger.info("Rebuilt sparse graphs with updated impedances")
+
 
     # Load OSM street network
     def load_network(self, force_download: bool = False):
@@ -224,9 +223,12 @@ class VectorRouter:
             logger.info(f"Loading cached graph from {cache_file}")
             with open(cache_file, 'rb') as f:
                 self.graph = pickle.load(f)
+            self.build_kdtree()
         else:
             logger.info(f"Downloading OSM data for {self.place_name}...")
             self.graph = ox.graph_from_place(self.place_name, network_type='drive', simplify=False)
+            self.build_kdtree()
+            self.graph = ox.add_edge_speeds(self.graph)
 
             # Add travel times with turn penalties
             self.graph = ox.add_edge_travel_times(self.graph)
@@ -234,11 +236,10 @@ class VectorRouter:
             with open(cache_file, 'wb') as f:
                 pickle.dump(self.graph, f)
             logger.info(f"Cached to {cache_file}")
-        
-        # self.visualize_coverage()
+
         self.graph_proj = ox.project_graph(self.graph)
         self.add_impedance()
-        self.build_sparse_graph()
+        # self.build_sparse_graph()
         logger.info(f"Loaded: {len(self.graph.nodes)} nodes, {len(self.graph.edges)} edges")
         
     # Load point coordinates and OD vectors
@@ -271,11 +272,16 @@ class VectorRouter:
         
         # Distance band thresholds (km)
         if vehicle_type == "car":
-            NEAR_THRESH = NEAR_THRESH_CAR
-            MED_THRESH = MED_THRESH_CAR
-        else: 
-            NEAR_THRESH = NEAR_THRESH_MOTORBIKE
-            MED_THRESH = MED_THRESH_MOTORBIKE
+            NEAR_THRESH = 5.0
+            MED_THRESH = 13.0
+        else:  # motorbike
+            NEAR_THRESH = 3.0
+            MED_THRESH = 10.0
+        
+        # Top k per band
+        K_NEAR = 13
+        K_MED = 9
+        K_FAR = 5
         
         vectors_by_origin = {}
         
@@ -285,64 +291,39 @@ class VectorRouter:
             for pid in self.points
         }
         
-        logger.info(f"Loading Parquet file: {vectors_file}")
-        df = pd.read_parquet(vectors_file)
+        # Read Parquet file
+        table = pq.read_table(vectors_file)
+        df = table.to_pandas()
         
-        # Assuming Parquet structure: each row is an origin-destination pair
-        # with columns: origin_id, destination_id, trips
-        
-        # Group by origin_id for processing
-        grouped = df.groupby('origin_id')
-        
-        for origin_id, group in grouped:
-            origin_coords = point_coords.get(origin_id)
-            if not origin_coords:
+        # Group by origin_id
+        for origin_id, group in df.groupby('origin_id'):
+            origin_lat, origin_lon = point_coords[origin_id]
+            
+            # Filter out zero/negative trips
+            group = group[group['trips'] > 0]
+            
+            if len(group) == 0:
                 continue
-                
-            # Process destinations for this origin
-            dests_data = group[['destination_id', 'trips']].to_dict('records')
             
-            # Filter out zero or negative trips
-            valid_dests = [d for d in dests_data if d['trips'] > 0]
-            if not valid_dests:
-                continue
-                
-            # Extract data for vectorized processing
-            dest_ids = []
-            trips_list = []
-            dest_coords_list = []
+            # Extract data
+            dest_ids = group['destination_id'].values
+            trips_arr = group['trips'].values.astype(np.float32)
             
-            for dest in valid_dests:
-                dest_id = dest['destination_id']
-                trips = dest['trips']
-                
-                dest_ids.append(dest_id)
-                trips_list.append(trips)
-                dest_coords_list.append(point_coords[dest_id])
-            
-            lat1, lon1 = origin_coords
-            
-            # Convert list of tuples to numpy arrays
-            dest_coords_arr = np.array(dest_coords_list)
-            lat2_array = dest_coords_arr[:, 0]
-            lon2_array = dest_coords_arr[:, 1]
-            
-            distances_arr = haversine_vectorized(lat1, lon1, lat2_array, lon2_array)
-            
-            # Use numpy arrays for faster operations
-            dest_ids_arr = np.array(dest_ids)
-            trips_arr = np.array(trips_list, dtype=np.float32)
+            # Vectorized distance calculation
+            dest_lats = np.array([point_coords[dest_id][0] for dest_id in dest_ids])
+            dest_lons = np.array([point_coords[dest_id][1] for dest_id in dest_ids])
+            distances_arr = haversine_distance_vectorized(origin_lat, origin_lon, dest_lats, dest_lons)
             
             # Create masks for each band
             near_mask = distances_arr <= NEAR_THRESH
             med_mask = (distances_arr > NEAR_THRESH) & (distances_arr <= MED_THRESH)
             far_mask = distances_arr > MED_THRESH
             
-            # Sample from each band (same logic as before)
+            # Sample from each band
             sampled_dests = []
             
             for mask, k in [(near_mask, K_NEAR), (med_mask, K_MED), (far_mask, K_FAR)]:
-                band_dest_ids = dest_ids_arr[mask]
+                band_dest_ids = dest_ids[mask]
                 band_trips = trips_arr[mask]
                 
                 if len(band_dest_ids) == 0 or k <= 0:
@@ -368,7 +349,7 @@ class VectorRouter:
                                 'trips': float(band_trips[idx])
                             })
                     except ValueError:
-                        # Fallback to uniform sampling
+                        # Fallback to uniform sampling if probabilities fail
                         sampled_indices = np.random.choice(
                             len(band_dest_ids),
                             size=min(k, len(band_dest_ids)),
@@ -404,77 +385,108 @@ class VectorRouter:
 
 
     # Route all destinations from one origin using Dijkstra
-    def route_from_origin(self, origin_id: int, vehicle_type="car"):
-        src_node = self.point_to_node.get(origin_id)
-        if not src_node:
-            logger.warning(f"No OSM node for point {origin_id}")
-            return
-
-        src_idx = self.node_to_idx.get(src_node)
-        if src_idx is None:
-            logger.warning(f"Node {src_node} not in sparse graph")
-            return
-        
-        # Get the right vector set based on vehicle type
+    def route_from_origin(self, vehicle_type="car", chunk_size=1000):
+        """Compute routes using chunked Dijkstra to save memory"""
+    
+        # Get the appropriate vectors
         if vehicle_type == "car":
-            vectors = self.car_vectors_by_origin.get(origin_id, [])
-            flow_key = "car_flow"
+            vectors_by_origin = self.car_vectors_by_origin
         else:
-            vectors = self.motorbike_vectors_by_origin.get(origin_id, [])
-            flow_key = "motorbike_flow"
-
-        if not vectors:
-            return
-
-        try:
-            distances, predecessors = dijkstra(
+            vectors_by_origin = self.motorbike_vectors_by_origin
+        
+        # Get all unique origin node indices with their IDs
+        origin_mapping = {}  # origin_idx -> [origin_ids that map to it]
+        for origin_id in vectors_by_origin.keys():
+            node_id = self.point_to_node.get(origin_id)
+            if node_id and node_id in self.node_to_idx:
+                origin_idx = self.node_to_idx[node_id]
+                if origin_idx not in origin_mapping:
+                    origin_mapping[origin_idx] = []
+                origin_mapping[origin_idx].append(origin_id)
+        
+        origin_indices = list(origin_mapping.keys())
+        total_origins = len(origin_indices)
+        logger.info(f"Processing {total_origins} unique origins for {vehicle_type} in chunks of {chunk_size}")
+        
+        # Process in chunks
+        for chunk_start in tqdm(range(0, total_origins, chunk_size), desc=f"{vehicle_type} routing"):
+            chunk_end = min(chunk_start + chunk_size, total_origins)
+            chunk_indices = origin_indices[chunk_start:chunk_end]
+            
+            # Compute Dijkstra for this chunk
+            dist_matrix, predecessors = dijkstra(
                 self.sparse_graph,
-                indices=src_idx,
+                directed=True,
+                indices=chunk_indices,
                 return_predecessors=True
             )
-        except Exception as e:
-            logger.warning(f"Routing failed for origin {origin_id} ({vehicle_type}): {e}")
-            return
-
-        for dest in vectors:
-            dest_id = dest['destination_id']
-            flow = dest['trips']
-
-            dest_node = self.idx_to_node.get(dest_id)
-            if dest_node is None:
-                continue
             
-            dest_osm_node = self.point_to_node.get(dest_id)  # Get OSM node for destination cell
-            if not dest_osm_node:
-                continue
-            dest_idx = self.node_to_idx.get(dest_osm_node)  # Now get the sparse graph index
-            if dest_idx is None:
-                continue
-            
-            if predecessors[dest_idx] == -9999:
-                continue
-
-            # Reconstruct path
-            route = []
-            current = dest_idx
-            while current != src_idx:
-                route.append(self.idx_to_node[current])
-                current = predecessors[current]
-                if current == -9999:
-                    break
-            if current == src_idx:
-                route.append(self.idx_to_node[src_idx])
-                route.reverse()
-            else:
-                continue
-
-            # Accumulate edge flows with vehicle type distinction
-            with self.flow_lock:
-                for u, v in zip(route[:-1], route[1:]):
-                    edges = self.graph[u][v]
-                    key = min(edges.keys(), key=lambda k: edges[k].get('length', float('inf')))
+            # Process each origin in the chunk
+            for i, origin_idx in enumerate(chunk_indices):
+                distances = dist_matrix[i]
+                preds = predecessors[i]
+                
+                # Process all origin_ids that map to this node
+                for origin_id in origin_mapping[origin_idx]:
+                    destination_flows = vectors_by_origin[origin_id]
                     
-                    # Store separate flow values or combine
+                    # Route to each destination
+                    for dest in destination_flows:
+                        dest_id = dest["destination_id"]
+                        flow = dest["trips"]
+
+                        dest_node = self.point_to_node.get(dest_id)
+                        if not dest_node or dest_node not in self.node_to_idx:
+                            continue
+
+                        dest_idx = self.node_to_idx[dest_node]
+
+                        if distances[dest_idx] == np.inf:
+                            continue
+
+                        path_indices = self._reconstruct_path(preds, dest_idx)
+                        if len(path_indices) < 2:
+                            continue
+
+                        self._accumulate_flow(path_indices, flow, vehicle_type)
+                                
+            # Free memory after each chunk
+            del dist_matrix, predecessors
+    
+    def _reconstruct_path(self, predecessors, dest_idx):
+        """Reconstruct path from predecessors array"""
+        path = []
+        current = dest_idx
+        
+        while current != -9999:  # -9999 is scipy's sentinel for "no predecessor"
+            path.append(current)
+            pred = predecessors[current]
+            if pred == -9999 or pred == current:
+                break
+            current = pred
+        
+        return path[::-1]
+    
+    def _accumulate_flow(self, path_indices, flow, vehicle_type):
+        """Accumulate flow along a path"""
+        flow_key = f"{vehicle_type}_flow"
+        
+        for i in range(len(path_indices) - 1):
+            u_idx = path_indices[i]
+            v_idx = path_indices[i + 1]
+            
+            u = self.idx_to_node[u_idx]
+            v = self.idx_to_node[v_idx]
+            
+            # Handle multi-edges
+            if v in self.graph[u]:
+                edges = self.graph[u][v]
+                if isinstance(edges, dict):
+                    key = min(edges.keys())
+                else:
+                    key = 0
+                
+                with self.flow_lock:
                     edge_key = (u, v, key)
                     if edge_key not in self.edge_flows:
                         self.edge_flows[edge_key] = {"car_flow": 0.0, "motorbike_flow": 0.0}
@@ -483,10 +495,10 @@ class VectorRouter:
 
     def find_nearest_node(self, lat: float, lon: float):
         try:
-            node_id, dist = ox.distance.nearest_nodes(
-                self.graph, X=lon, Y=lat, return_dist=True
-            )
-            return node_id, dist
+            dist, idx = self.kdtree.query([lat, lon])
+            node_id = self.node_ids[idx]
+            dist_meters = dist * 111139 # rough conversion
+            return node_id, dist_meters
         except Exception as e:
             logger.warning(f"Error finding node for ({lat}, {lon}): {e}")
             return None, float('inf')
@@ -495,30 +507,20 @@ class VectorRouter:
         logger.info("Processing car routes...")
         self.add_impedance("car")
         self.build_sparse_graph("car")
-        
-        car_origin_ids = list(self.car_vectors_by_origin.keys())
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            list(tqdm(
-                executor.map(lambda x: self.route_from_origin(x, "car"), car_origin_ids),
-                total=len(car_origin_ids),
-                desc="Car routing"
-            ))
+        self.route_from_origin("car", chunk_size=90)
 
     def process_motorbike(self):
         logger.info("Processing motorbike routes...")
         self.add_impedance("motorbike")
         self.build_sparse_graph("motorbike")
-        
-        motorbike_origin_ids = list(self.motorbike_vectors_by_origin.keys())
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            list(tqdm(
-                executor.map(lambda x: self.route_from_origin(x, "motorbike"), motorbike_origin_ids),
-                total=len(motorbike_origin_ids),
-                desc="Motorbike routing"
-            ))        
+        self.route_from_origin("motorbike", chunk_size=90)        
 
     
-    def process_all(self, output_file: str = 'routes.geojson', force=False):        
+    def process_all(self, output_file: str = 'routes.geojson', force=False):
+        if not force and self.load_edge_flows_cache():
+            self.save_edge_flows(output_file)
+            return
+        
         # Process car routes
         self.process_car()
         
@@ -610,218 +612,50 @@ class VectorRouter:
             return True
         return False
     
-    def visualize_coverage(self):
-        """Create a map showing road network vs flows"""
-        import matplotlib.pyplot as plt
-        
-        # Plot all roads
-        fig, ax = ox.plot_graph(self.graph, show=False, close=False, 
-                            edge_color='gray', edge_alpha=0.3, node_size=0)
-        
-        # Plot roads with flows
-        edges_with_flow = []
-        for (u, v, key), flow_dict in self.edge_flows.items():
-            if flow_dict.get('total_flow', 0) > 0:
-                edges_with_flow.append((u, v, key))
-        
-        # Highlight edges with flows
-        ec = ['r' if (u, v, 0) in edges_with_flow else 'gray' 
-            for u, v, k in self.graph.edges(keys=True)]
-        
-        fig, ax = ox.plot_graph(self.graph, edge_color=ec, node_size=0, 
-                            show=False, close=False)
-        
-        # Add title
-        ax.set_title(f'Road Coverage: {len(edges_with_flow)}/{len(self.graph.edges)} edges have flows')
-        plt.savefig('coverage_debug.png', dpi=300, bbox_inches='tight')
-        plt.show()
-    
-    def analyze_edge_flows(self, pcu_factors: dict = None, output_file: str = "flow_analysis.json"):
-        """
-        Analyze edge flows and compute:
-        1. % of total PCU-km on different road types
-        2. Gini coefficient for PCU-km distribution
-        3. Save results to JSON and plot Lorenz curve
-        
-        Args:
-            pcu_factors: PCU factors for different vehicles (default: car=1.0, motorbike=0.33)
-            output_file: Path to save JSON results
-        """
-        if pcu_factors is None:
-            pcu_factors = {"car": 1.0, "motorbike": 0.33}
-        
-        # Initialize road type categories
-        road_type_categories = {
-            'trunk': ['trunk', 'trunk_link'],
-            'primary': ['primary', 'primary_link'],
-            'secondary': ['secondary', 'secondary_link'],
-            'tertiary': ['tertiary', 'tertiary_link'],
-            'other': []  # All other types
-        }
-        
-        # Initialize totals
-        total_pcu_km = 0.0
-        road_type_pcu_km = {category: 0.0 for category in road_type_categories}
-        
-        # Collect PCU-km for all edges for Gini calculation
-        all_pcu_km = []
-        
-        for (u, v, key), flow_dict in self.edge_flows.items():
-            car_flow = flow_dict.get("car_flow", 0)
-            motorbike_flow = flow_dict.get("motorbike_flow", 0)
-            
-            # Convert flows to PCUs
-            pcu_flow = (car_flow * pcu_factors.get("car", 1.0) + 
-                       motorbike_flow * pcu_factors.get("motorbike", 0.33))
-            
-            if pcu_flow <= 0:
-                continue
-            
-            edge = self.graph[u][v][key]
-            length_m = edge.get("length", 0)
-            length_km = length_m / 1000.0
-            
-            # Calculate PCU-km for this edge
-            pcu_km = pcu_flow * length_km
-            all_pcu_km.append(pcu_km)
-            total_pcu_km += pcu_km
-            
-            # Categorize by road type
-            highway = edge.get("highway", None)
-            if isinstance(highway, list):
-                highway = highway[0] if highway else None
-            
-            categorized = False
-            for category, road_types in road_type_categories.items():
-                if category == 'other':
-                    continue
-                if highway in road_types or highway == category:
-                    road_type_pcu_km[category] += pcu_km
-                    categorized = True
-                    break
-            
-            if not categorized:
-                road_type_pcu_km['other'] += pcu_km
-        
-        # Calculate percentages
-        percentages = {}
-        for category, pcu_km in road_type_pcu_km.items():
-            if total_pcu_km > 0:
-                percentages[category] = (pcu_km / total_pcu_km) * 100
-            else:
-                percentages[category] = 0.0
-        
-        # Calculate Gini coefficient
-        gini_coefficient = self._calculate_gini(all_pcu_km) if all_pcu_km else 0.0
-        
-        # Prepare results
-        results = {
-            "total_pcu_km": total_pcu_km,
-            "road_type_pcu_km": {k: float(v) for k, v in road_type_pcu_km.items()},
-            "percentages": {k: float(v) for k, v in percentages.items()},
-            "gini_coefficient": float(gini_coefficient),
-            "num_edges": len(all_pcu_km),
-            "pcu_factors": pcu_factors
-        }
-        
-        # Save to JSON
-        import json
-        with open(output_file, 'w') as f:
-            json.dump(results, f, indent=2)
-        
-        logger.info(f"Saved PCU analysis results to {output_file}")
-        
-        # Generate Lorenz curve plot
-        self._plot_lorenz_curve(all_pcu_km, gini_coefficient, output_file.replace('.json', '_lorenz.png'))
-        
-        return results
-    
-    def _calculate_gini(self, values):
-        """
-        Calculate Gini coefficient using the standard formula.
-        Gini = (∑∑|x_i - x_j|) / (2n² * mean)
-        """
-        if not values:
-            return 0.0
-            
-        values = np.array(values)
-        n = len(values)
-        
-        if n == 0 or np.sum(values) == 0:
-            return 0.0
-        
-        # Sort for better numerical stability
-        values = np.sort(values)
-        
-        # Calculate using vectorized approach
-        indices = np.arange(1, n + 1)
-        
-        # Gini = (2 * ∑(i * x_i) / (n * ∑x_i)) - (n + 1)/n
-        gini = (2 * np.sum(indices * values)) / (n * np.sum(values)) - (n + 1) / n
-        
-        return gini
-    
-    def _plot_lorenz_curve(self, values, gini_coefficient, output_file="lorenz_curve.png"):
-        """
-        Plot and save Lorenz curve for PCU-km distribution.
-        """
-        if not values:
-            logger.warning("No values to plot Lorenz curve")
-            return
-        
-        sorted_values = np.sort(np.array(values))
-        n = len(sorted_values)
-        cum_values = np.cumsum(sorted_values)
-        total = cum_values[-1]
-        
-        if total == 0:
-            return
-        
-        # Lorenz curve
-        lorenz_curve = cum_values / total
-        
-        # Perfect equality line
-        perfect_equality = np.linspace(0, 1, n)
-        
-        # Create plot
-        plt.figure(figsize=(10, 8))
-        plt.plot(perfect_equality, perfect_equality, 'k--', label='Perfect Equality', linewidth=2)
-        plt.plot(perfect_equality, lorenz_curve, 'b-', label=f'Lorenz Curve (Gini = {gini_coefficient:.3f})', linewidth=2)
-        plt.fill_between(perfect_equality, perfect_equality, lorenz_curve, alpha=0.3, color='blue')
-        
-        plt.xlabel('Cumulative Proportion of Edges', fontsize=12)
-        plt.ylabel('Cumulative Proportion of PCU-km', fontsize=12)
-        plt.title('Lorenz Curve: Distribution of PCU-km across Road Edges', fontsize=14)
-        plt.grid(True, alpha=0.3)
-        plt.legend(loc='upper left', fontsize=11)
-        
-        # Add text box with statistics
-        stats_text = f'Total edges: {n:,}\n'
-        stats_text += f'Total PCU-km: {total:,.2f}\n'
-        stats_text += f'Gini coefficient: {gini_coefficient:.4f}\n'
-        stats_text += f'Mean PCU-km: {np.mean(values):.2f}\n'
-        stats_text += f'Median PCU-km: {np.median(values):.2f}'
-        
-        plt.text(0.02, 0.98, stats_text, transform=plt.gca().transAxes,
-                fontsize=10, verticalalignment='top',
-                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
-        
-        plt.tight_layout()
-        plt.savefig(output_file, dpi=150, bbox_inches='tight')
-        plt.close()
-        
-        logger.info(f"Saved Lorenz curve plot to {output_file}")
+    # Caching of process_all()
+    def save_edge_flows_cache(self):
+        path = os.path.join(self.cache_dir, "edge_flows.pkl")
+        with open(path, "wb") as f:
+            pickle.dump(dict(self.edge_flows), f)
+        logger.info(f"Saved edge_flows cache to {path}")
 
-def haversine_vectorized(lon1, lat1, lon2_arr, lat2_arr):
-    # Convert decimal degrees to radians 
-    lon1, lat1, lon2_arr, lat2_arr = map(np.radians, [lon1, lat1, lon2_arr, lat2_arr])
+    def load_edge_flows_cache(self):
+        path = os.path.join(self.cache_dir, "edge_flows.pkl")
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                self.edge_flows = defaultdict(float, pickle.load(f))
+            logger.info(f"Loaded edge_flows cache from {path}")
+            return True
+        return False
 
-    dlon = lon2_arr - lon1
-    dlat = lat2_arr - lat1
 
-    a = np.sin(dlat/2.0)**2 + np.cos(lat1) * np.cos(lat2_arr) * np.sin(dlon/2.0)**2
-    c = 2 * np.arcsin(np.sqrt(a))
-    return 6371 * c  
+def haversine_distance_vectorized(lat1, lon1, lat2_arr, lon2_arr):
+    """
+    Vectorized version for calculating distances from one point to many points.
+    Uses numpy for speed when calculating many distances at once.
+    
+    Args:
+        lat1, lon1: Single origin point (degrees)
+        lat2_arr, lon2_arr: Arrays of destination coordinates (degrees)
+    
+    Returns:
+        Array of distances in kilometers
+    """
+    R = 6371.0
+    
+    # Convert to radians
+    lat1_rad = np.radians(lat1)
+    lat2_rad = np.radians(lat2_arr)
+    delta_lat = np.radians(lat2_arr - lat1)
+    delta_lon = np.radians(lon2_arr - lon1)
+    
+    # Haversine formula (vectorized)
+    a = (np.sin(delta_lat / 2) ** 2 + 
+        np.cos(lat1_rad) * np.cos(lat2_rad) * 
+        np.sin(delta_lon / 2) ** 2)
+    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+    
+    return R * c
 
 def main():
     router = VectorRouter("Yogyakarta, Indonesia", cache_dir="./osm_cache")
@@ -830,18 +664,13 @@ def main():
     
     router.load_data(
         points_file="data/raw/rea_1000m_v2.geojson",
-        car_vectors_file="data/raw/parquet/rea_1000m_car_vectors_v2.parquet",
-        motorbike_vectors_file="data/raw/parquet/rea_1000m_motorbike_vectors_v2.parquet"
+        car_vectors_file="data/raw/Parquet/rea_1000m_car_vectors_v2.parquet",
+        motorbike_vectors_file="data/raw/Parquet/rea_1000m_motorbike_vectors_v2.parquet"
     )
 
     router.precompute_nearest_nodes()
     
     router.process_all(output_file='data/raw/rea_1000m_edge_flows_v3.geojson')
-
-    analysis_results = router.analyze_edge_flows(
-    pcu_factors={"car": 1.0, "motorbike": 0.33},
-    output_file="data/analysis/flow_analysis.json"
-    )
     
     logger.info("Complete!")
 

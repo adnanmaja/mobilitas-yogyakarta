@@ -50,9 +50,9 @@ NHB_CAR_SHARES = 0.2
 
 # Total Trip Ratio Per Purposes, (Devi et al., 2019)
 # 1156 trips as baseline 
-HBW_TOTAL_TRIPS = 71105.56 # 1156 * (46.11 + 15.40)/100 = 711.0556
-HBNW_TOTAL_TRIPS = 30298.76 # 1156 * (26.21)/100 = 302.9876
-NHB_TOTAL_TRIPS = 13201.52 # 1156 * (6.06 + 1.21 + 1.47 + 1.12 + 1.56)/100 = 132.0152
+HBW_TOTAL_TRIPS = 623.8       #7110.556 # 1156 * (46.11 + 15.40)/100 = 711.0556
+HBNW_TOTAL_TRIPS = 277.7     #3029.876 # 1156 * (26.21)/100 = 302.9876
+NHB_TOTAL_TRIPS = 98.6      #1320.152 # 1156 * (6.06 + 1.21 + 1.47 + 1.12 + 1.56)/100 = 132.0152
 
 # Gravity Model Params 
 # gamma is the distance decay factor

@@ -21,17 +21,32 @@ class JsonToParquet:
             
             for item in items:
                 origin_id = item['origin_id']
-                for dest in item['destinations']:
-                    rows.append({
-                        'origin_id': origin_id,
-                        'destination_id': dest['destination_id'],
-                        'trips': dest['trips']
-                    })
+                destinations = item.get('destinations', [])
+                
+                # Handle case where there are no destinations
+                if not destinations:
+                    # Option 1: Skip origins with no destinations (current behavior)
+                    # continue
+                    
+                    # Option 2: Keep origin with null destination (uncomment if needed)
+                    # rows.append({
+                    #     'origin_id': origin_id,
+                    #     'destination_id': None,
+                    #     'trips': None
+                    # })
+                    pass
+                else:
+                    for dest in destinations:
+                        rows.append({
+                            'origin_id': origin_id,
+                            'destination_id': dest['destination_id'],
+                            'trips': dest['trips']
+                        })
                 
                 if len(rows) >= batch_size:
                     part_file = f"{output_path}.part{batch_num}"
                     df = pd.DataFrame(rows)
-                    df.to_parquet(part_file)
+                    df.to_parquet(part_file, index=False)  # Added index=False
                     part_files.append(part_file)
                     batch_num += 1
                     rows = []
@@ -40,9 +55,8 @@ class JsonToParquet:
         if rows:
             part_file = f"{output_path}.part{batch_num}"
             df = pd.DataFrame(rows)
-            df.to_parquet(part_file)
+            df.to_parquet(part_file, index=False)  # Added index=False
             part_files.append(part_file)
-            batch_num += 1  # Increment for proper counting
         
         print(f"{vehicle} json converted to {len(part_files)} parquet part(s)")
         
@@ -113,36 +127,11 @@ def validate_parquet_conversion(vehicle):
         print(f"Error validating {vehicle}: {e}")
         return None
     
-def visualize_origin_counts(vehicle):
-    """
-    Simple bar chart of top origin IDs by trip count
-    """
-    df = pd.read_parquet(f"data/raw/parquet/rea_1000m_{vehicle}_vectors_v2.parquet")
-    print(list(df.columns))
-    
-    # Group by origin and sum trips
-    origin_counts = df.groupby('origin_id')['trips'].sum().sort_values(ascending=False)
-    print(len(origin_counts))
-    print(origin_counts.head(10))
-    
-    # Plot top 20 origins
-    # plt.figure(figsize=(12, 6))
-    # origin_counts.head(20).plot(kind='bar', color='skyblue')
-    # plt.title(f'Top 20 Origin IDs by Total Trips - {vehicle}')
-    # plt.xlabel('Origin ID')
-    # plt.ylabel('Total Trips')
-    # plt.xticks(rotation=45)
-    # plt.tight_layout()
-    # plt.savefig(f'data/visualization/{vehicle}_top_origins.png', dpi=300)
-    # plt.show()
-
 if __name__=='__main__':
     vehhh = ['car', 'motorbike']
     toparquet = JsonToParquet()
 
     for v in vehhh:
-        # toparquet.convert(v)
-        # validate_parquet_conversion(v)
-        visualize_origin_counts(v)
-
+        toparquet.convert(v)
+        validate_parquet_conversion(v)
 
