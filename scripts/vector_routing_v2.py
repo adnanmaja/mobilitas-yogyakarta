@@ -2,7 +2,7 @@ import os
 import json
 import logging
 import numpy as np
-from geopy.distance import geodesic
+import matplotlib.pyplot as plt
 from scipy.spatial import cKDTree
 import osmnx as ox
 from tqdm import tqdm
@@ -11,7 +11,7 @@ import pickle
 from collections import defaultdict
 from threading import Lock
 from concurrent.futures import ThreadPoolExecutor
-import ijson
+import gc
 import pyarrow.parquet as pq
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import dijkstra
@@ -30,6 +30,11 @@ class VectorRouter:
         self.edge_flows = defaultdict(float)
         self.flow_lock = Lock()
         os.makedirs(cache_dir, exist_ok=True)
+
+        self.PCU_FACTORS = {
+            'car': 1.0,
+            'motorbike': 0.25  
+        }
 
         np.random.seed(67)
 
@@ -214,7 +219,6 @@ class VectorRouter:
         self.build_sparse_graph("motorbike")
         logger.info("Rebuilt sparse graphs with updated impedances")
 
-
     # Load OSM street network
     def load_network(self, force_download: bool = False):
         cache_file = os.path.join(self.cache_dir, f"graph_{self.place_name.replace(', ', '_')}.pkl")
@@ -226,7 +230,7 @@ class VectorRouter:
             self.build_kdtree()
         else:
             logger.info(f"Downloading OSM data for {self.place_name}...")
-            self.graph = ox.graph_from_place(self.place_name, network_type='drive', simplify=False)
+            self.graph = ox.graph_from_place(self.place_name, network_type='drive', simplify=True)
             self.build_kdtree()
             self.graph = ox.add_edge_speeds(self.graph)
 
@@ -276,7 +280,7 @@ class VectorRouter:
             MED_THRESH = 13.0
         else:  # motorbike
             NEAR_THRESH = 3.0
-            MED_THRESH = 10.0
+            MED_THRESH = 10.0   
         
         # Top k per band
         K_NEAR = 13
@@ -452,6 +456,7 @@ class VectorRouter:
                                 
             # Free memory after each chunk
             del dist_matrix, predecessors
+            gc.collect()
     
     def _reconstruct_path(self, predecessors, dest_idx):
         """Reconstruct path from predecessors array"""
@@ -507,20 +512,15 @@ class VectorRouter:
         logger.info("Processing car routes...")
         self.add_impedance("car")
         self.build_sparse_graph("car")
-        self.route_from_origin("car", chunk_size=90)
+        self.route_from_origin("car", chunk_size=100)
 
     def process_motorbike(self):
         logger.info("Processing motorbike routes...")
         self.add_impedance("motorbike")
         self.build_sparse_graph("motorbike")
-        self.route_from_origin("motorbike", chunk_size=90)        
-
+        self.route_from_origin("motorbike", chunk_size=100) 
     
-    def process_all(self, output_file: str = 'routes.geojson', force=False):
-        if not force and self.load_edge_flows_cache():
-            self.save_edge_flows(output_file)
-            return
-        
+    def process_all(self, output_file: str = 'routes.geojson', force=False): 
         # Process car routes
         self.process_car()
         
@@ -532,6 +532,8 @@ class VectorRouter:
         )
         
         self.save_edge_flows(output_file)
+
+        self.analyze_flow_distribution(output_path="data/analysis/distribution_analysis.json".replace('.geojson', ''), plot_lorenz=True)
 
 
     # Save aggregated edge flows as GeoJSON
@@ -612,21 +614,185 @@ class VectorRouter:
             return True
         return False
     
-    # Caching of process_all()
-    def save_edge_flows_cache(self):
-        path = os.path.join(self.cache_dir, "edge_flows.pkl")
-        with open(path, "wb") as f:
-            pickle.dump(dict(self.edge_flows), f)
-        logger.info(f"Saved edge_flows cache to {path}")
+    def calculate_pcu_km(self):
+        """Calculate PCU-km for each edge"""
+        pcu_km_by_edge = {}
+        pcu_km_by_road_class = defaultdict(float)
+        
+        for (u, v, key), flow_dict in self.edge_flows.items():
+            car_flow = flow_dict.get("car_flow", 0)
+            motorbike_flow = flow_dict.get("motorbike_flow", 0)
+            
+            # Convert to PCU
+            pcu_flow = (car_flow * self.PCU_FACTORS['car'] + 
+                        motorbike_flow * self.PCU_FACTORS['motorbike'])
+            
+            # Get edge length in km
+            edge = self.graph[u][v][key]
+            length_km = edge.get("length", 0) / 1000.0
+            
+            # Calculate PCU-km
+            pcu_km = pcu_flow * length_km
+            
+            if pcu_km > 0:
+                pcu_km_by_edge[(u, v, key)] = pcu_km
+                
+                # Group by road class
+                highway = edge.get("highway", "unclassified")
+                if isinstance(highway, list):
+                    highway = highway[0]
+                
+                # Categorize
+                if highway in ['motorway', 'trunk']:
+                    road_class = 'trunk'
+                elif highway == 'primary':
+                    road_class = 'primary'
+                elif highway == 'secondary':
+                    road_class = 'secondary'
+                elif highway == 'tertiary':
+                    road_class = 'tertiary'
+                else:
+                    road_class = 'other'
+                
+                pcu_km_by_road_class[road_class] += pcu_km
+        
+        return pcu_km_by_edge, pcu_km_by_road_class
+    
+    def calculate_gini_coefficient(self, values):
+        """Calculate Gini coefficient for a list of values"""
+        if not values:
+            return 0.0
+        
+        # Sort values
+        sorted_values = np.sort(np.array(values))
+        n = len(sorted_values)
+        
+        # Gini formula
+        index = np.arange(1, n + 1)
+        gini = (np.sum((2 * index - n - 1) * sorted_values)) / (n * np.sum(sorted_values))
+        
+        return gini
+    
+    def generate_lorenz_curve_data(self, values):
+        """Generate data points for Lorenz curve"""
+        if not values:
+            return np.array([]), np.array([])
+        
+        sorted_values = np.sort(np.array(values))
+        cumulative_values = np.cumsum(sorted_values)
+        total = cumulative_values[-1]
+        
+        # Normalize
+        cumulative_percentage = cumulative_values / total * 100
+        population_percentage = np.arange(1, len(values) + 1) / len(values) * 100
+        
+        return population_percentage, cumulative_percentage
+    
+    def analyze_flow_distribution(self, output_path="analysis", plot_lorenz=True):
+        """Analyze flow distribution and generate statistics"""
+    
+        # 1. Calculate PCU-km
+        pcu_km_by_edge, pcu_km_by_road_class = self.calculate_pcu_km()
+        
+        # 2. Calculate Gini coefficient for link flows (PCU-km)
+        pcu_km_values = list(pcu_km_by_edge.values())
+        gini = self.calculate_gini_coefficient(pcu_km_values)
+        
+        # 3. Generate Lorenz curve data
+        pop_percent, cum_percent = self.generate_lorenz_curve_data(pcu_km_values)
+        
+        # 4. Calculate percentage by road class
+        total_pcu_km = sum(pcu_km_by_road_class.values())
+        percentages_by_class = {}
+        for road_class, value in pcu_km_by_road_class.items():
+            percentages_by_class[road_class] = (value / total_pcu_km * 100) if total_pcu_km > 0 else 0
+        
+        # 5. Plot Lorenz curve if requested
+        if plot_lorenz and len(pop_percent) > 0:
+            plt.figure(figsize=(10, 6))
+            plt.plot(pop_percent, cum_percent, 'b-', linewidth=2, label='Lorenz Curve')
+            plt.plot([0, 100], [0, 100], 'r--', linewidth=1, label='Perfect Equality')
+            plt.fill_between(pop_percent, cum_percent, pop_percent, alpha=0.3)
+            
+            # Add Gini coefficient annotation
+            plt.annotate(f'Gini = {gini:.3f}', 
+                        xy=(0.6, 0.2), 
+                        xycoords='axes fraction',
+                        fontsize=12,
+                        bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
+            
+            plt.xlabel('Cumulative Percentage of Road Links (%)', fontsize=12)
+            plt.ylabel('Cumulative Percentage of PCU-km (%)', fontsize=12)
+            plt.title('Lorenz Curve of Traffic Flow Distribution', fontsize=14, fontweight='bold')
+            plt.grid(True, alpha=0.3)
+            plt.legend(loc='upper left')
+            plt.axis('equal')
+            
+            # Save the plot
+            plot_file = output_path.replace('.json', '_lorenz.png') if output_path.endswith('.json') else f"{output_path}_lorenz.png"
+            plt.tight_layout()
+            plt.savefig(plot_file, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            logger.info(f"Saved Lorenz curve plot to {plot_file}")
+        
+        # 6. Save results to JSON
+        results = {
+            'gini_coefficient': float(gini),
+            'total_pcu_km': float(total_pcu_km),
+            'pcu_km_by_road_class': dict(percentages_by_class),
+            'lorenz_curve': {
+                'population_percentage': pop_percent.tolist(),
+                'cumulative_percentage': cum_percent.tolist()
+            },
+            'edge_level_pcu_km': [
+                {
+                    'u': key[0],
+                    'v': key[1],
+                    'pcu_km': value,
+                    'road_class': self._get_road_class(key)
+                }
+                for key, value in pcu_km_by_edge.items()
+            ]
+        }
+        
+        # Save to JSON
+        json_file = output_path if output_path.endswith('.json') else f"{output_path}.json"
+        with open(json_file, 'w') as f:
+            json.dump(results, f, indent=2)
+        
+        logger.info(f"Saved distribution analysis to {json_file}")
+        
+        # Print summary
+        print(f"\n=== Flow Distribution Analysis ===")
+        print(f"Gini Coefficient: {gini:.4f}")
+        print(f"Total PCU-km: {total_pcu_km:.2f}")
+        print("\nPCU-km by Road Class (%):")
+        for road_class, percentage in percentages_by_class.items():
+            print(f"  {road_class}: {percentage:.2f}%")
+        
+        return results
 
-    def load_edge_flows_cache(self):
-        path = os.path.join(self.cache_dir, "edge_flows.pkl")
-        if os.path.exists(path):
-            with open(path, "rb") as f:
-                self.edge_flows = defaultdict(float, pickle.load(f))
-            logger.info(f"Loaded edge_flows cache from {path}")
-            return True
-        return False
+    def _get_road_class(self, edge_key):
+        """Helper to get road class for an edge"""
+        u, v, key = edge_key
+        edge = self.graph[u][v][key]
+        highway = edge.get("highway", "unclassified")
+        if isinstance(highway, list):
+            highway = highway[0]
+        
+        if highway in ['motorway', 'trunk']:
+            return 'trunk'
+        elif highway == 'primary':
+            return 'primary'
+        elif highway == 'secondary':
+            return 'secondary'
+        elif highway == 'tertiary':
+            return 'tertiary'
+        elif highway == 'residential':
+            return 'residential'
+        else:
+            return 'other'
 
 
 def haversine_distance_vectorized(lat1, lon1, lat2_arr, lon2_arr):

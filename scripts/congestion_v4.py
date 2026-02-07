@@ -1,8 +1,7 @@
 import json
 import os
 from typing import Dict, List, Tuple
-import copy
-
+import gc
 
 # BPR Parameters (uncalibrated)
 CAR_ALPHA = 0.15
@@ -27,7 +26,7 @@ ROAD_CAPACITIES = {
 DEFAULT_CAPACITY = 1.0 # Default capacity if road type not found
 
 # Traffic convergence threshold
-CONVERGENCE_THRESHOLD = 0.01 # 1% change
+CONVERGENCE_THRESHOLD = 0.005 # .5% change
 
 # Speed limits by road type (km/h), assumed
 SPEED_LIMITS = {
@@ -214,64 +213,46 @@ class CongestionFeedbackLoop:
             True if converged, False otherwise
         """
         max_change = 0
+        total_change = 0
+        checked_edges = 0
         
         for old_edge, new_edge in zip(old_edges, new_edges):
-            old_car_time = old_edge['properties'].get('car_travel_time', 0)
-            new_car_time = new_edge['properties'].get('car_travel_time', 0)
+            old_props = old_edge['properties']
+            new_props = new_edge['properties']
+            
+            # Check car travel time
+            old_car_time = old_props.get('car_travel_time', 0)
+            new_car_time = new_props.get('car_travel_time', 0)
+            
+            # Check motorbike travel time
+            old_bike_time = old_props.get('motorbike_travel_time', 0)
+            new_bike_time = new_props.get('motorbike_travel_time', 0)
+            
+            # Check flows (important for detecting rerouting)
+            old_car_flow = old_props.get('car_flow', 0)
+            new_car_flow = new_props.get('car_flow', 0)
             
             if old_car_time > 0:
-                change = abs(new_car_time - old_car_time) / old_car_time
-                max_change = max(max_change, change)
+                # Calculate relative change in travel time
+                time_change = abs(new_car_time - old_car_time) / old_car_time
+                max_change = max(max_change, time_change)
+                total_change += time_change
+                checked_edges += 1
+                
+            if old_car_flow > 0 or new_car_flow > 0:
+                # Calculate flow change (handle division by zero)
+                if old_car_flow + new_car_flow > 0:
+                    flow_change = abs(new_car_flow - old_car_flow) / max(1, (old_car_flow + new_car_flow)/2)
+                    max_change = max(max_change, flow_change)
+        
+        avg_change = total_change / max(1, checked_edges)
+        
+        # Print debug info
+        print(f"    Convergence check: max_change={max_change:.4f}, avg_change={avg_change:.4f}, threshold={CONVERGENCE_THRESHOLD}")
         
         return max_change < CONVERGENCE_THRESHOLD
     
-    def run_feedback_loop(self, max_iterations: int = 10) -> Dict:
-        """
-        Run the complete congestion feedback loop.
-        
-        Args:
-            max_iterations: Maximum number of iterations
-            
-        Returns:
-            Updated GeoJSON with final congestion levels
-        """
-        print("Starting congestion feedback loop...")
-        
-        # Initial edges (with initial flows from OD assignment)
-        current_edges = self.edges
-        
-        for iteration in range(max_iterations):
-            print(f"\nIteration {iteration + 1}/{max_iterations}")
-            
-            # Store previous edges for convergence check
-            previous_edges = copy.deepcopy(current_edges)
-            
-            # Update congestion based on current flows
-            updated_edges = self.update_congestion(current_edges)
-            
-            # Here you would re-route OD flows using the updated travel times
-            # This requires a routing engine - for now, we'll simulate this
-            # by adjusting flows based on the new travel times
-            adjusted_edges = self.adjust_flows_based_on_congestion(updated_edges)
-            
-            # Update current edges
-            current_edges = adjusted_edges
-            
-            # Check for convergence
-            if iteration > 0 and self.check_convergence(previous_edges, current_edges):
-                print(f"Converged after {iteration + 1} iterations")
-                break
-        
-        # Create final GeoJSON
-        final_geojson = self.geojson.copy()
-        final_geojson['features'] = current_edges
-        
-        # Calculate summary statistics
-        self.calculate_statistics(current_edges)
-        
-        return final_geojson
-    
-    def adjust_flows_based_on_congestion(self, edges: List[Dict], routing_module) -> List[Dict]:
+    def adjust_flows_based_on_congestion(self, edges: List[Dict], routing_module, iteration) -> List[Dict]:
         """
         Re-route OD flows using updated travel times.
         
@@ -283,11 +264,6 @@ class CongestionFeedbackLoop:
             Edges with re-routed flows
         """
         print("  Re-routing based on updated travel times...")
-
-        print(f"  DEBUG: Initial edge_flows count: {len(routing_module.edge_flows)}")
-        if routing_module.edge_flows:
-            sample_key = list(routing_module.edge_flows.keys())[0]
-            print(f"  DEBUG: Sample flow before clear: {routing_module.edge_flows[sample_key]}")
         
         # Save current congestion state to temporary file
         temp_geojson = "temp_congestion.geojson"
@@ -304,93 +280,91 @@ class CongestionFeedbackLoop:
         routing_module.rebuild_sparse_graphs()
         
         # Clear previous flows
-        old_flows = routing_module.edge_flows.copy()
         routing_module.edge_flows.clear()
         
-        # Re-route
+        # Re-route both vehicle types
         print("  Re-routing car trips...")
         routing_module.process_car()
-        print(f"  DEBUG: After process_car, edge_flows count: {len(routing_module.edge_flows)}")
         
         print("  Re-routing motorbike trips...")
         routing_module.process_motorbike()
-        print(f"  DEBUG: After process_motorbike, edge_flows count: {len(routing_module.edge_flows)}")
 
-        flow_lookup = {}
-        for (edge_u, edge_v, edge_id), flows in routing_module.edge_flows.items():
-            if edge_id is not None:
-                flow_lookup[edge_id] = {
-                    'car_flow': flows.get('car_flow', 0),
-                    'motorbike_flow': flows.get('motorbike_flow', 0)
-                }
-            else:
-                # Fallback to (u, v) if no edge_id
-                flow_lookup[(edge_u, edge_v)] = {
-                    'car_flow': flows.get('car_flow', 0),
-                    'motorbike_flow': flows.get('motorbike_flow', 0)
-                }
-            
-        # Get updated edge flows
-        debug_count = 0
-        max_debug = 5
-
-        sample_keys = list(routing_module.edge_flows.keys())[:5]
-        print(f"\n  DEBUG: Sample edge_flows keys: {sample_keys}")
-        print(f"  DEBUG: Total edge_flows: {len(routing_module.edge_flows)}")
-
-        updated_edges = []
-        for i, edge in enumerate(edges):
+        pcu_km_by_edge, _ = routing_module.calculate_pcu_km()   
+        gini = routing_module.calculate_gini_coefficient(list(pcu_km_by_edge.values()))
+        print(f"Gini coffecient for iteration {iteration+1}: {float(gini)}")  
+        
+        # Create a more robust edge ID lookup
+        edge_id_map = {}
+        for edge in edges:
             props = edge['properties']
             u = props.get('u')
             v = props.get('v')
             edge_id = props.get('id') or props.get('edge_id') or props.get('osmid')
             
-            flows = {'car_flow': 0, 'motorbike_flow': 0}
-
-            # Try to find matching flow by checking all possible keys
-            found = False
+            # Create multiple possible lookup keys
             if u is not None and v is not None:
-                # Try different key values (0, 1, 2, etc. for multi-edges)
-                for key_val in [0, 1, 2, edge_id]:  # Include edge_id as potential key
-                    edge_key = (u, v, key_val)
-                    if edge_key in routing_module.edge_flows:
-                        flows = routing_module.edge_flows[edge_key]
-                        found = True
-                        break
+                # Key format used by OSMnx: (u, v, key) where key is usually 0
+                key = props.get('key', 0)
+                edge_id_map[(u, v, key)] = edge
+                # Also map by edge_id if available
+                if edge_id:
+                    edge_id_map[edge_id] = edge
+        
+        # Update edges with new flows
+        updated_edges = []
+        edge_flows = routing_module.edge_flows
+        
+        if not edge_flows:
+            print("  WARNING: No edge flows returned from routing!")
+            return edges
+        
+        # Debug: print sample of flows
+        sample_keys = list(edge_flows.keys())[:3]
+        print(f"  DEBUG: Sample flow keys: {sample_keys}")
+        print(f"  DEBUG: Total flow entries: {len(edge_flows)}")
+        
+        flow_lookup = {}
+        for (u_key, v_key, *rest), flow_data in edge_flows.items():
+            flow_lookup[(u_key, v_key)] = flow_data
+
+        matched_count = 0
+        unmatched_count = 0
+
+        n = iteration + 1
+        new_weight = 1.0 / n
+        old_weight = 1.0 - new_weight
+        
+        for edge in edges:
+            props = edge['properties'].copy()
+            u = props.get('u')
+            v = props.get('v')
+
+            old_car_flow = props.get('car_flow', 0)
+            old_motorbike_flow = props.get('motorbike_flow', 0)
+            
+            found_flow = flow_lookup.get((u, v))
+            
+            if found_flow:
+                found_car_flow = found_flow.get('car_flow', 0)
+                found_motorbike_flow = found_flow.get('motorbike_flow', 0)
                 
-                # If not found, maybe it's using a different key format
-                if not found:
-                    # Check all keys that match (u, v) regardless of third element
-                    matching_keys = [k for k in routing_module.edge_flows.keys() 
-                                if k[0] == u and k[1] == v]
-                    if matching_keys:
-                        # Take the first matching key
-                        flows = routing_module.edge_flows[matching_keys[0]]
-                        found = True
-                        if debug_count < max_debug:
-                            print(f"  Found among {len(matching_keys)} matching keys: {flows}")
-                            
-            if flows is None and u is not None and v is not None:
-                flows = flow_lookup.get((u, v))
-            if flows is None and u is not None and v is not None and edge_id is not None:
-                flows = flow_lookup.get((u, v, edge_id))
-            car_flow = flows['car_flow']
-            motorbike_flow = flows['motorbike_flow']
+                props['car_flow'] = (old_weight * props.get('car_flow', 0)) + (new_weight * found_car_flow)
+                props['motorbike_flow'] = (old_weight * props.get('motorbike_flow', 0)) + (new_weight * found_motorbike_flow)
+                matched_count += 1
+            else:
+                unmatched_count += 1
             
-            # Update properties
-            updated_props = props.copy()
-            updated_props['car_flow'] = car_flow
-            updated_props['motorbike_flow'] = motorbike_flow
-            updated_props['total_flow'] = car_flow + motorbike_flow
-            
-            updated_edge = edge.copy()
-            updated_edge['properties'] = updated_props
-            updated_edges.append(updated_edge)
-                        
+            props['total_flow'] = props.get('car_flow', 0) + props.get('motorbike_flow', 0)
+            edge['properties'] = props
+            updated_edges.append(edge)
+        
+        print(f"  DEBUG: Matched {matched_count} edges, {unmatched_count} unmatched")
+        
         # Clean up temp file
         if os.path.exists(temp_geojson):
             os.remove(temp_geojson)
-        
+
+        gc.collect()    
         return updated_edges
     
     def calculate_statistics(self, edges: List[Dict]):
@@ -439,25 +413,3 @@ class CongestionFeedbackLoop:
             json.dump(geojson, f, indent=2)
         
         print(f"\nResults saved to: {output_path}")
-
-# Wasnt meant to be ran directly
-# def main():
-#     """
-#     Main function to run the congestion feedback loop.
-#     """
-#     # Configuration
-#     INPUT_GEOJSON = "data/raw/rea_1000m_edge_flows_v3.geojson"  
-#     OUTPUT_GEOJSON = "data/raw/rea_1000m_congestions_v4.geojson"
-    
-#     # Initialize the congestion feedback loop
-#     feedback_loop = CongestionFeedbackLoop(INPUT_GEOJSON)
-    
-#     # Run the feedback loop
-#     result_geojson = feedback_loop.run_feedback_loop(max_iterations=10)
-    
-#     # Save results
-#     feedback_loop.save_results(result_geojson, OUTPUT_GEOJSON)
-
-
-# if __name__ == "__main__":
-#     main()

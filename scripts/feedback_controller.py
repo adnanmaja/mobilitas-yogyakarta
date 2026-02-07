@@ -1,6 +1,6 @@
 import json
 from vector_routing_v2 import VectorRouter
-from congestion_v4 import CongestionFeedbackLoop
+from congestion_v45 import CongestionFeedbackLoop
 import time
 
 class FeedbackController:
@@ -40,11 +40,11 @@ class FeedbackController:
             # 2. Re-route based on new travel times
             print("  2. Re-routing...")
             re_routed_edges = self.congestion.adjust_flows_based_on_congestion(
-                updated_edges, self.router
+                updated_edges, self.router, iteration
             )
             
             # 3. Update congestion model with new flows
-            self.congestion.edges = re_routed_edges
+            self.congestion.edges = re_routed_edges 
             
             # Check convergence
             if iteration > 0:

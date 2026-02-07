@@ -6,8 +6,11 @@ from typing import Tuple, List, Dict, Optional
 import geopandas as gpd
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
-from tools.to_parquet import JsonToParquet
 import gc
+import os
+import pyarrow as pa
+import pyarrow.parquet as pq
+from pyarrow import feather
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -50,13 +53,13 @@ NHB_CAR_SHARES = 0.2
 
 # Total Trip Ratio Per Purposes, (Devi et al., 2019)
 # 1156 trips as baseline 
-HBW_TOTAL_TRIPS = 623.8       #7110.556 # 1156 * (46.11 + 15.40)/100 = 711.0556
-HBNW_TOTAL_TRIPS = 277.7     #3029.876 # 1156 * (26.21)/100 = 302.9876
-NHB_TOTAL_TRIPS = 98.6      #1320.152 # 1156 * (6.06 + 1.21 + 1.47 + 1.12 + 1.56)/100 = 132.0152
+HBW_TOTAL_TRIPS = 71105.56 # 1156 * (46.11 + 15.40)/100 = 711.0556
+HBNW_TOTAL_TRIPS = 30298.76 # 1156 * (26.21)/100 = 302.9876
+NHB_TOTAL_TRIPS = 13201.52 # 1156 * (6.06 + 1.21 + 1.47 + 1.12 + 1.56)/100 = 132.0152
 
 # Gravity Model Params 
 # gamma is the distance decay factor
-GAMMA_HBW = 0.9   # 10 - 13km avg, fine with longer trip
+GAMMA_HBW = 0.8   # 10 - 13km avg, fine with longer trip
 ALPHA_HBW = 1.0
 BETA_HBW = 1.0
 
@@ -560,24 +563,21 @@ class ImprovedGravityModel:
             mode_shares['motorbike'] *= NHB_MOTORBIKE_SHARES
             mode_shares['car'] *= NHB_CAR_SHARES
             
-    
+    # Save OD matrix as sparse vectors directly to Parquet file
     def save_sparse_vectors(self, od_matrix: np.ndarray,
                            grid_ids: np.ndarray,
                            filename: str,
                            threshold: float = 1e-6):
-        """
-        Save OD matrix as sparse vectors to JSON file
-        
-        Each vector: {origin_id: X, destinations: [{dest_id: Y, trips: Z}, ...]}
-        """
-        import json
-        
-        print(f"\nSaving sparse vectors to {filename}...")
         start_time = time.time()
-        
+    
         n = len(od_matrix)
-        vectors = []
         
+        # Collect data in lists for efficiency
+        origin_ids_list = []
+        dest_ids_list = []
+        trips_list = []
+        
+        # Collect sparse matrix data
         for i in range(n):
             # Get non-zero destinations for this origin
             row = od_matrix[i]
@@ -587,27 +587,38 @@ class ImprovedGravityModel:
                 dest_indices = np.where(non_zero_mask)[0]
                 values = row[non_zero_mask]
                 
-                # Create destinations list
-                destinations = []
                 for dest_idx, value in zip(dest_indices, values):
-                    destinations.append({
-                        'destination_id': int(grid_ids[dest_idx]),
-                        'trips': float(value)
-                    })
-                
-                vectors.append({
-                    'origin_id': int(grid_ids[i]),
-                    'destinations': destinations,
-                    'total_trips': float(values.sum())
-                })
+                    origin_ids_list.append(int(grid_ids[i]))
+                    dest_ids_list.append(int(grid_ids[dest_idx]))
+                    trips_list.append(float(value))
         
-        # Save to file
-        with open(filename, 'w') as f:
-            json.dump(vectors, f, indent=2)
+        if origin_ids_list:
+            # Create PyArrow arrays
+            origin_arr = pa.array(origin_ids_list, type=pa.int64())
+            dest_arr = pa.array(dest_ids_list, type=pa.int64())
+            trips_arr = pa.array(trips_list, type=pa.float64())
+            
+            # Create table with explicit schema
+            table = pa.table({
+                'origin_id': origin_arr,
+                'destination_id': dest_arr,
+                'trips': trips_arr
+            })
+            
+            # Save to Parquet with compression
+            pq.write_table(table, filename, compression='snappy')
+            
+            elapsed_time = time.time() - start_time
+            print(f"  Saved {len(origin_ids_list)} OD pairs in {elapsed_time:.2f} seconds")
+            print(f"  Sparsity: {(od_matrix > threshold).sum() / od_matrix.size:.1%}")
+            
+            # Check file size if file exists
+            if os.path.exists(filename):
+                print(f"  File size: {os.path.getsize(filename) / 1024 / 1024:.2f} MB")
+        else:
+            print("  No data to save (all values below threshold)")
         
-        elapsed_time = time.time() - start_time
-        print(f"  Saved {len(vectors)} vectors in {elapsed_time:.2f} seconds")
-        print(f"  Sparsity: {(od_matrix > threshold).sum() / od_matrix.size:.1%}")
+        return len(origin_ids_list) if origin_ids_list else 0
 
 
 
@@ -701,63 +712,6 @@ class ImprovedGravityModel:
         
         return gdf
 
-    def plot_od_matrix_detailed(gdf, od_matrix, grid_ids, title="Detailed OD Matrix", 
-                            max_origins=20, output_file="od_matrix_detailed.png"):
-        """
-        Plot detailed view of OD matrix for first N origins
-        """
-        print(f"\nPlotting detailed OD matrix view...")
-        
-        # Convert to DataFrame for easier handling
-        n = min(max_origins, len(od_matrix))
-        
-        fig, axes = plt.subplots(n, 1, figsize=(15, 3*n))
-        if n == 1:
-            axes = [axes]
-        
-        for i in range(n):
-            # Get trips from this origin
-            origin_trips = od_matrix[i]
-            
-            # Create a temporary GeoDataFrame with trip destinations
-            temp_gdf = gdf.copy()
-            temp_gdf['trips_to'] = origin_trips
-            
-            # Plot
-            non_zero_dest = origin_trips[origin_trips > 0]
-            if len(non_zero_dest) > 0:
-                vmin = non_zero_dest.min()
-                vmax = non_zero_dest.max()
-                norm = LogNorm(vmin=vmin, vmax=vmax)
-                
-                temp_gdf.plot(column='trips_to', 
-                            cmap='Blues', 
-                            ax=axes[i], 
-                            legend=False,
-                            norm=norm,
-                            edgecolor='black',
-                            linewidth=0.1)
-            else:
-                temp_gdf.plot(ax=axes[i], color='lightgray', 
-                            edgecolor='black', linewidth=0.1)
-            
-            # Mark the origin cell
-            origin_geom = gdf.iloc[i].geometry
-            if hasattr(origin_geom, 'centroid'):
-                centroid = origin_geom.centroid
-                axes[i].plot(centroid.x, centroid.y, 'ro', markersize=8, 
-                            markeredgecolor='black', markeredgewidth=1)
-            
-            axes[i].set_title(f'Origin Cell {grid_ids[i]}: {origin_trips.sum():.1f} trips to {(origin_trips>0).sum()} destinations')
-            axes[i].set_xlabel('')
-            axes[i].set_ylabel('')
-        
-        plt.suptitle(title, fontsize=14)
-        plt.tight_layout()
-        plt.savefig(output_file, dpi=150, bbox_inches='tight')
-        plt.show()
-        
-        print(f"  Saved detailed plot to {output_file}")    
 
 def scale_matrix_in_chunks(matrix, scaling_factor, chunk_size=1000):
     """Scale a matrix in chunks to reduce memory usage"""
@@ -946,7 +900,7 @@ def main():
     )
     od_matrices['HBW'] = od_hbw
     avg_hbw_distance = model.calculate_average_distance(od_hbw, distance_matrix, "HBW")
-    model.plot_od_heatmap(gdf, od_hbw, "OD HBW", 'Tesst.png')
+    # model.plot_od_heatmap(gdf, od_hbw, "OD HBW", 'Tesst.png')
     gc.collect()
     
     # HBNW: Home-Based Non-Work (Residential -> Amenity)
@@ -956,7 +910,7 @@ def main():
         distance_matrix=distance_matrix,
         purpose_name="HBNW",
         purpose_params={
-            'gamma': GAMMA_HBNW,        # Prefer spots that's closer to home
+            'gamma': GAMMA_HBNW,       
             'total_trips': HBNW_TOTAL_TRIPS,
             'alpha': ALPHA_HBNW,
             'beta': BETA_HBNW
@@ -964,7 +918,7 @@ def main():
     )
     od_matrices['HBNW'] = od_hbnw
     avg_hbnw_distance = model.calculate_average_distance(od_hbnw, distance_matrix, "HBNW")
-    model.plot_od_heatmap(gdf, od_hbnw, "OD HBNW", 'Tesst2.png')
+    # model.plot_od_heatmap(gdf, od_hbnw, "OD HBNW", 'Tesst2.png')
     del od_hbnw
     gc.collect()
     
@@ -976,7 +930,7 @@ def main():
         distance_matrix=distance_matrix,
         purpose_name="NHB",
         purpose_params={
-            'gamma': GAMMA_HBNW,        # Much prefer shorter destinations
+            'gamma': GAMMA_HBNW,        
             'total_trips': NHB_TOTAL_TRIPS,
             'alpha': ALPHA_NHB,
             'beta': BETA_NHB
@@ -984,7 +938,7 @@ def main():
     )
     od_matrices['NHB'] = od_nhb
     avg_nhb_distance = model.calculate_average_distance(od_nhb, distance_matrix, "NHB")
-    model.plot_od_heatmap(gdf, od_nhb, "OD NHB", 'Tesst3.png')
+    # model.plot_od_heatmap(gdf, od_nhb, "OD NHB", 'Tesst3.png')
     del od_nhb
     gc.collect()
 
@@ -1045,7 +999,7 @@ def main():
         for mode, mode_matrix in purpose_modes.items():
             key = f"{purpose_name}_{mode}"
             mode_od_matrices[key] = mode_matrix
-            model.plot_od_heatmap(gdf, mode_matrix, f"{purpose_name} {mode}", f'Tesst{purpose_name}_{mode}.png')
+            # model.plot_od_heatmap(gdf, mode_matrix, f"{purpose_name} {mode}", f'Tesst{purpose_name}_{mode}.png')
 
             del mode_matrix
             gc.collect()
@@ -1093,7 +1047,7 @@ def main():
     print(f"{'='*60}")
 
     for mode, matrix in combined_modes.items():
-        filename = f'data/raw/rea_1000m_{mode}_vectors_v2.json'
+        filename = f'data/raw/Parquet/rea_1000m_{mode}_vectors_v2.parquet'
         print(f"\nSaving {mode} OD matrix...")
         model.save_sparse_vectors(
             od_matrix=matrix,
@@ -1119,10 +1073,6 @@ def main():
     print(f"HBNW average: {avg_hbnw_distance/1000:.2f} km")
     print(f"NHB average: {avg_nhb_distance/1000:.2f} km")
 
-    # Save to parquet
-    for mode in modes:
-        toparquet = JsonToParquet()
-        toparquet.convert(mode)
 
 if __name__ == "__main__":
     main()
