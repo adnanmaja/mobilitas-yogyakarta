@@ -10,15 +10,68 @@ from shapely.geometry import Point, LineString
 import pickle
 from collections import defaultdict
 from threading import Lock
-from concurrent.futures import ThreadPoolExecutor
 import gc
 import pyarrow.parquet as pq
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import dijkstra
-
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+
+PCU_FACTORS = {
+    'car': 1.0,
+    'motorbike': 0.25  
+}
+
+# Road penalties for different vehicle types
+ROAD_WEIGHTS = {
+    # Car weights (as before)
+    'car': {
+        'motorway': 1.0,
+        'trunk': 1.0,
+        'primary': 1.1,
+        'secondary': 1.2,
+        'tertiary': 1.3,
+        'residential': 2.0,
+        'service': 3.0,
+        'unclassified': 2.5,
+        'living_street': 4.0,  # Very slow for cars
+        'track': 5.0,          # Bad for cars
+        'path': 10.0,          # Nearly impossible for cars
+        'pedestrian': 50.0,    # Not for cars
+    },
+    # Motorbike weights - can use smaller roads more easily
+    'motorbike': {
+        'motorway': 1.0,
+        'trunk': 1.0,
+        'primary': 1.05,       # Slightly better than cars
+        'secondary': 1.1,
+        'tertiary': 1.15,
+        'residential': 1.2,    # Much better than cars
+        'service': 1.3,        # Much better than cars
+        'unclassified': 1.4,
+        'living_street': 1.5,  # Motorbikes can handle these
+        'track': 2.0,          # Can use dirt tracks
+        'path': 3.0,           # Can use paths
+        'pedestrian': 10.0,    # Avoid but possible
+    }
+}
+
+# Noise parameters: Uniform(-δ, +δ)
+NOISE_DELTA = {
+    'car': 0.05,      # ±5% noise for cars
+    'motorbike': 0.15 # ±15% noise for motorbikes
+}
+
+TURN_PENALTY_MULTIPLIERS = {
+    'car': 1.0,      # Standard turn penalties
+    'motorbike': 0.6  # Motorbikes handle turns better
+}
+
+BASE_SPEEDS = {
+    'car': 13.89,      # 50 km/h
+    'motorbike': 11.11  # 40 km/h (more conservative for safety)
+}
 
 class VectorRouter:
     # Convert origin-destination vectors to real paths using OSM
@@ -31,10 +84,7 @@ class VectorRouter:
         self.flow_lock = Lock()
         os.makedirs(cache_dir, exist_ok=True)
 
-        self.PCU_FACTORS = {
-            'car': 1.0,
-            'motorbike': 0.25  
-        }
+        self.PCU_FACTORS = PCU_FACTORS
 
         np.random.seed(67)
 
@@ -53,7 +103,7 @@ class VectorRouter:
         logger.info(f"Built KDTree with {len(node_ids)} nodes")
 
     def add_impedance(self, vehicle_type="car"):
-        # Road weights for different vehicle types
+        # Road penalties for different vehicle types
         ROAD_WEIGHTS = {
             # Car weights (as before)
             'car': {
@@ -89,8 +139,8 @@ class VectorRouter:
 
         # Noise parameters: Uniform(-δ, +δ)
         NOISE_DELTA = {
-            'car': 0.01,      # ±1% noise for cars
-            'motorbike': 0.03 # ±3% noise for motorbikes
+            'car': 0.05,      # ±5% noise for cars
+            'motorbike': 0.15 # ±15% noise for motorbikes
         }
 
         TURN_PENALTY_MULTIPLIERS = {

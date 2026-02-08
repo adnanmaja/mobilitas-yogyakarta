@@ -7,7 +7,7 @@ import gc
 CAR_ALPHA = 0.15
 CAR_BETA = 4
 MOTORBKE_ALPHA = 0.10  
-MOTORBIKE_BETA = 3.5 
+MOTORBIKE_BETA = 3.25 
 
 # PCU factor for motorbikes  (φ in the equation)
 PCU_FACTOR = 0.25  # assumed 1 car = 4 bikes
@@ -17,11 +17,11 @@ ROAD_CAPACITIES = {
     "trunk": 6.0,
     "primary": 4.0,
     "secondary": 2.0,
-    "tertiary": 1.0,
-    "residential": 0.5,
-    "living_street": 0.3,
+    "tertiary": 1.5,
+    "residential": 1.0,
+    "living_street": 0.5,
     "unclassified": 1.0,
-    "service": 0.2,
+    "service": 0.5,
 }
 DEFAULT_CAPACITY = 1.0 # Default capacity if road type not found
 
@@ -30,16 +30,18 @@ CONVERGENCE_THRESHOLD = 0.005 # .5% change
 
 # Speed limits by road type (km/h), assumed
 SPEED_LIMITS = {
-    "trunk": 70,
-    "primary": 50,
-    "secondary": 40,
-    "tertiary": 30,
-    "residential": 20,
-    "living_street": 10,
+    "trunk": 100,
+    "primary": 70,
+    "secondary": 60,
+    "tertiary": 50,
+    "residential": 40,
+    "living_street": 30,
     "unclassified": 30,
-    "service": 15,
+    "service": 20,
 }
-DEFAULT_SPEED_LIMIT = 30
+DEFAULT_SPEED_LIMIT = 50
+
+VC_CAP = 3.00 # Cap v/c to 3.00 
 
 class CongestionFeedbackLoop:
     """
@@ -150,7 +152,7 @@ class CongestionFeedbackLoop:
             return t0
         
         vc_ratio = v / c
-        return t0 * (1 + alpha * (vc_ratio ** beta))
+        return t0 * (1 + alpha * min((vc_ratio ** beta), VC_CAP))
     
     def update_congestion(self, edges: List[Dict]) -> List[Dict]:
         """
@@ -369,36 +371,65 @@ class CongestionFeedbackLoop:
     
     def calculate_statistics(self, edges: List[Dict]):
         """
-        Calculate and print summary statistics about the network.
-        
-        Args:
-            edges: Final edges after feedback loop
+        Calculate and print summary statistics including mean and median travel times.
         """
-        total_car_flow = 0
-        total_motorbike_flow = 0
-        total_length = 0
+        import statistics
+
+        car_times = []
+        bike_times = []
+        
+        # For flow-weighted averages
+        total_car_travel_time = 0
+        total_car_volume = 0
+        total_bike_travel_time = 0
+        total_bike_volume = 0
+
         congested_segments = 0
         total_segments = len(edges)
         
         for edge in edges:
             props = edge['properties']
+            c_time = props.get('car_travel_time', 0)
+            b_time = props.get('motorbike_travel_time', 0)
+            c_flow = props.get('car_flow', 0)
+            b_flow = props.get('motorbike_flow', 0)
+
+            # Collect for Median and Simple Mean
+            if c_time > 0: car_times.append(c_time)
+            if b_time > 0: bike_times.append(b_time)
+
+            # Collect for Flow-Weighted Mean
+            total_car_travel_time += (c_time * c_flow)
+            total_car_volume += c_flow
+            total_bike_travel_time += (b_time * b_flow)
+            total_bike_volume += b_flow
             
-            total_car_flow += props.get('car_flow', 0)
-            total_motorbike_flow += props.get('motorbike_flow', 0)
-            total_length += props.get('length_m', 0)
-            
-            vc_ratio = props.get('vc_ratio', 0)
-            if vc_ratio > 0.8:
+            if props.get('vc_ratio', 0) > 0.8:
                 congested_segments += 1
         
+        # Calculate Stats
+        avg_car = statistics.mean(car_times) if car_times else 0
+        med_car = statistics.median(car_times) if car_times else 0
+        avg_bike = statistics.mean(bike_times) if bike_times else 0
+        med_bike = statistics.median(bike_times) if bike_times else 0
+        
+        weighted_car = total_car_travel_time / total_car_volume if total_car_volume > 0 else 0
+        weighted_bike = total_bike_travel_time / total_bike_volume if total_bike_volume > 0 else 0
+
         print("\n" + "="*50)
         print("NETWORK STATISTICS")
         print("="*50)
-        print(f"Total car flow: {total_car_flow:.0f} vehicles")
-        print(f"Total motorbike flow: {total_motorbike_flow:.0f} vehicles")
-        print(f"Total effective flow: {total_car_flow + total_motorbike_flow * PCU_FACTOR:.0f} PCU")
-        print(f"Total network length: {total_length/1000:.1f} km")
-        print(f"Congested segments (v/c > 0.8): {congested_segments}/{total_segments} ({congested_segments/total_segments*100:.1f}%)")
+        print(f"CONGESTION: {congested_segments}/{total_segments} segments at v/c > 0.8")
+        
+        print("\nCAR TRAVEL TIMES (seconds per segment):")
+        print(f"  Average: {avg_car:.2f}s")
+        print(f"  Median:  {med_car:.2f}s")
+        print(f"  Weighted Average: {weighted_car:.2f}s (based on flow)")
+
+        print("\nMOTORBIKE TRAVEL TIMES (seconds per segment):")
+        print(f"  Average: {avg_bike:.2f}s")
+        print(f"  Median:  {med_bike:.2f}s")
+        print(f"  Weighted Average: {weighted_bike:.2f}s (based on flow)")
         print("="*50)
     
     def save_results(self, geojson: Dict, output_path: str):

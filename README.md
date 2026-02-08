@@ -154,7 +154,7 @@ The model implements a static iterative assignment, introducing feedback between
 4. Re-route OD flows using updated costs
 5. Repeat for 5–10 iterations until changes stabilize
 
-This captures first-order congestion feedback without full dynamic traffic simulation.
+To achieve a stable user equilibrium and prevent oscillations between iterations, the model implements the standard Method of Successive Averages (MSA)
 
 ### G. Mode Choice & Multi-Class Traffic Assignment
 To better reflect observed travel behavior in Yogyakarta, the model extends beyond a single homogeneous traffic stream by explicitly representing mode choice and multi-class traffic flow, focusing on cars and motorbikes (with public transport planned for future iterations).

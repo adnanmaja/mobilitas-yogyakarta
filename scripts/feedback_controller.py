@@ -1,6 +1,6 @@
 import json
 from vector_routing_v2 import VectorRouter
-from congestion_v45 import CongestionFeedbackLoop
+from congestion_v4 import CongestionFeedbackLoop
 import time
 
 class FeedbackController:
@@ -56,6 +56,9 @@ class FeedbackController:
             
             elapsed = time.time() - start_time
             print(f"  Iteration completed in {elapsed:.1f} seconds")
+
+            if iteration < 1:
+                self.congestion.calculate_statistics(self.congestion.edges)
         
         print(f"\n{'='*60}")
         print("FEEDBACK LOOP COMPLETE")
