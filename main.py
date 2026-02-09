@@ -1,7 +1,6 @@
-
-from scripts.od_matrix_v2 import ImprovedGravityModel
-from scripts.vector_routing_v2 import VectorRouter
-from scripts.congestion_v4 import CongestionFeedbackLoop
+from scripts.od_gravity.gravity_model import ImprovedGravityModel
+from scripts.vector_routing.vector_router_model import VectorRouter
+from scripts.congestion.congestion_model import CongestionFeedbackLoop
 from typing import Tuple, List, Dict, Optional, Any    
 import yaml
 from dataclasses import dataclass, fields

@@ -22,3 +22,4 @@ data/analysis
 *.pkl
 *.csv
 *.gpkg
+*.egg-info

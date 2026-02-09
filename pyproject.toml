@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mobilitas"
+version = "0.1.0"
+
+[tool.setuptools]
+packages = ["scripts"] 
+
+[tool.setuptools.package-dir]
+# This maps the package name to the directory
+"scripts" = "scripts"

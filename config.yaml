@@ -27,6 +27,7 @@ export_paths:
   congestion: "data/raw/rea_1000m_congestions_v4.geojson"
 
 cache_paths:
+  graph: 'osm_cache/graph_Yogyakarta_Indonesia.pkl'
   congestion: 'temp_congestion.geojson'
  
 # ===== Grid and Intensity Score Parameters =====
