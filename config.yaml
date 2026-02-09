@@ -1,0 +1,245 @@
+city: "Yogyakarta, Indonesia"
+last_updated: "Feb 8 2026" 
+note: "AM peak; v/c cakepp, Gini stuck 0.89, barely any change per congestion iters"
+stats: "stats3"
+
+# File paths
+data_paths:
+  boundary: 'data/raw/Yogyakarta.geojson'
+  worldpop: "data/raw/Worldpop/clipped_utm49s_2025_yogyakarta_100m.tif"
+  ghsl: "data/raw/GHSL/Cropped_GHS_BUILT_V_NRES_E2025_GLOBE_R2023A_32749_3ss_V1_0_R10_C30.tif"
+  viirs: "data/raw/VIIRS/Cropped_reproj_VNL_npp_2024_global_vcmslcfg_v2_c202502261200.average_masked.dat.tif"  
+  overture: 'data/raw/Overture/cropped_filtered_overture.geojson'
+  grid: 'data/raw/rea_1000m_v2.geojson'
+  car_vector: "data/raw/Parquet/rea_1000m_car_vectors_v2.parquet"
+  motorbike_vector: "data/raw/Parquet/rea_1000m_motorbike_vectors_v2.parquet"
+
+figure_paths:
+  residential: 'data/figures/residential_1000m.png'
+  employment: 'data/figures/employment_1000m.png'
+  service_amenity: 'data/figures/amenity_1000m.png'
+  
+export_paths:
+  residential: 'data/raw/residential_1000m.geojson'
+  employment: 'data/raw/employment_1000m.geojson'
+  service_amenity: 'data/raw/services_amenities_1000m.geojson'
+  edge_flow: 'data/raw/rea_1000m_edge_flows_v3.geojson'
+  congestion: "data/raw/rea_1000m_congestions_v4.geojson"
+
+cache_paths:
+  congestion: 'temp_congestion.geojson'
+ 
+# ===== Grid and Intensity Score Parameters =====
+# Grid size
+cell_size: 1000 # square meters
+
+grid_weights:
+  ghsl: 0.6
+  viirs: 0.4
+
+  commercial_nhb: 0.4
+  worship: 0.6
+
+  commercial_hbnw: 0.3
+  leisure: 0.3
+  service: 0.4
+
+# How are services and amenities scaled 
+scales:
+  worship: 'log1p'  # Whatever is closer mindset
+  commercial_nhb: 'sqrt' # Closer is better (why bother going to shopping mall when theres lunch in the nearby street vendors)
+  commercial_hbnw: 'linear' # Bigger spot attracts more people (they have more to offer)
+  leisure: 'linear' # Bigger spot attracts more people
+  service: 'sqrt' # Linear is skewed (few grid at 70 - 100 intensity, while the rest at 25 - 30)
+
+# ===== OD Matrix and Gravity Model Parameters =====
+distance_thresh:
+  short: 3    # Short (<3km)
+  medium: 10  # Medium (3km - 10km)
+  long: 15    # Long (10km - 15km)
+              # Very long (>15km)
+
+# Mode Shares Per Distance, uncalibrated 
+distance_shares:
+  short: 
+    car: 0.10
+    motorbike: 0.90
+  medium:
+    car: 0.40
+    motorbike: 0.60
+  long:
+    car: 0.50
+    motorbike: 0.50
+  vlong:
+    car: 0.60
+    motorbike: 0.40
+
+# Mode Shares per Trip Purposes
+# BPS "Provinsi Daerah Istimewa Yogyakarta Dalam Angka 2025"
+# Total motor di DIY = 2,929,766 (87%); Mobil = 449,913 (13)%
+purpose_shares:
+  hbw:
+    motorbike: 1.2
+    car: 0.8
+  hbnw:
+    motorbike: 1.4
+    car: 0.6
+  nhb:
+    motorbike: 1.8
+    car: 0.2
+
+# Total Trip Ratio Per Purposes
+# 1156 trips as baseline, (Devi et al., 2019)
+total_trips:
+  hbw: 71105.56 # 1156 * (46.11 + 15.40)/100 = 711.0556
+  hbnw: 30298.76 # 1156 * (26.21)/100 = 302.9876
+  nhb: 13201.52 # 1156 * (6.06 + 1.21 + 1.47 + 1.12 + 1.56)/100 = 132.0152
+
+# Gravity Model Params, uncalibrated
+gravity:
+  hbw:
+    gamma: 0.8 # 10 - 13km avg, fine with longer trip
+    alpha: 1.0
+    beta: 1.0
+  hbnw:
+    gamma: 3.5 # 6 - 9km avg, prefer closer spots
+    alpha: 1.0
+    beta: 1.0
+  nhb:
+    gamma: 3.5 # 1 - 4km avg, much prefer shorter destinations
+    alpha: 1.0
+    beta: 1.0
+
+# Time of day multiplier 
+time_weight:
+  hbw: 1
+  hbnw: 0.15
+  nhb: 0.05
+
+# Scaling factor (To populate v/c if needed)
+od_scale: 1
+
+# Iterative Proportional Fitting (IPF) / Furness
+ipf:
+  iterations: 15
+  tolerance: 1.0e-6
+
+# Boundary leakage (to simulate traffic going out of DIY)
+boundary_buffer: 3.0 # km
+leakage:
+  hbw: 0.30
+  hbnw: 0.10
+  nhb: 0.05
+
+# ===== Vector Routing Parameters =====
+# Pasengger Car Factor (PCU)
+pcu:
+  car: 1.0
+  motorbike: 0.25 # 1 car = 4 motorbikes
+
+# Road penalties for different vehicle types
+road_penalties:
+  car:
+    motorway: 1.0
+    trunk: 1.0
+    primary: 1.1
+    secondary: 1.2
+    tertiary: 1.3
+    residential: 2.0
+    service: 3.0
+    unclassified: 2.5
+    living_street: 4.0 
+    track: 5.0
+    path: 10.0
+    pedestrian: 50.0
+  motorbike:
+    motorway: 1.0
+    trunk: 1.0
+    primary: 1.05
+    secondary: 1.1
+    tertiary: 1.15
+    residential: 1.2
+    service: 1.3
+    unclassified: 1.4
+    living_street: 1.5
+    track: 2.0
+    path: 3.0
+    pedestrian: 10.0
+default_penalty: 2.0
+
+# Noise parameters: Uniform(-δ, +δ)
+noise_delta:
+  car: 0.05 # ±5% noise for cars
+  motorbike: 0.15 # ±15% noise for motorbikes
+
+# Turn penalty multipliers, motorbikes handle turns better
+turn_penalty:
+  car: 1.0
+  motorbike: 0.6
+
+# To separate "driving time" from "intersectional delay" (turn penalties).
+base_speeds:
+  car: 13.89 # 50 km/h
+  motorbike: 11.11 # 40 km/h (more conservative for safety)
+default_speed: 13.89
+
+# Distance band thresholds for destination sampling (km)
+near_thresh:
+  car: 5.0
+  motorbike: 13.0
+medium_thresh:
+  car: 3.0
+  motorbike: 10.0
+
+# Sample top k number of trips per band
+k_near: 13
+k_med: 9
+k_far: 5  
+
+# ===== Congetsion Model Parameters =====
+congestion_iterations: 5
+
+# BPR Parameters (uncalibrated)
+bpr:
+  car:
+    beta: 0.15
+    alpha: 4
+  motorbike:
+    alpha: 0.10
+    beta: 3.25
+
+# PCU factor for motorbikes  (φ in the equation)
+motorbike_pcu: 0.25 # 1 car = 4 motorbikes
+
+# Road type to capacity mapping (relative capacities)
+road_capacities:
+  trunk: 6.0
+  primary: 4.0
+  secondary: 2.0
+  tertiary: 1.5
+  residential: 1.0
+  living_street: 0.5
+  unclassified: 1.0
+  service: 0.5
+
+# Default capacity if road type not found
+default_capacity: 1.0
+
+# Traffic convergence threshold (.5% change)
+convergence_threshold: 0.005
+
+# Speed limits by road type (km/h), assumed
+speed_limits:
+  trunk: 100
+  primary: 70
+  secondary: 60
+  tertiary: 50
+  residential: 40
+  living_street: 30
+  unclassified: 30
+  service: 20
+
+default_speed_limit: 50
+
+# Cap v/c to 3.00
+vc_cap: 3.00

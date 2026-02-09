@@ -1,79 +1,79 @@
 import json
 import os
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
+import time
 import gc
+from vector_routing_v2 import ImpedanceCalculator, SparseGraphBuilder, GraphManager, Router, VectorRouter, FlowAnalyzer
+import yaml
+from dataclasses import dataclass, fields
 
-# BPR Parameters (uncalibrated)
-CAR_ALPHA = 0.15
-CAR_BETA = 4
-MOTORBKE_ALPHA = 0.10  
-MOTORBIKE_BETA = 3.25 
+# Configuration
+@dataclass
+class Config:
+    bpr: Dict[str, Dict[str, float]]
+    motorbike_pcu: float
+    road_capacities: Dict[str, float]
+    default_capacity: float
+    convergence_threshold: float
+    speed_limits: Dict[str, int]
+    default_speed_limit: int 
+    congestion_iterations: int
+    vc_cap: float
+    export_paths: Dict[str, str]
+    cache_paths: Dict[str, str]
 
-# PCU factor for motorbikes  (φ in the equation)
-PCU_FACTOR = 0.25  # assumed 1 car = 4 bikes
+    @classmethod
+    def from_yaml(cls, config_path: str = "config.yaml"):
+        with open(config_path) as f:
+            config_dict = yaml.safe_load(f)
+        class_fields = {f.name for f in fields(cls)}
+        filtered_dict = {
+            k: v for k, v in config_dict.items() 
+            if k in class_fields
+        }
+        return cls(**filtered_dict)
 
-# Road type to capacity mapping (relative capacities)
-ROAD_CAPACITIES = {
-    "trunk": 6.0,
-    "primary": 4.0,
-    "secondary": 2.0,
-    "tertiary": 1.5,
-    "residential": 1.0,
-    "living_street": 0.5,
-    "unclassified": 1.0,
-    "service": 0.5,
-}
-DEFAULT_CAPACITY = 1.0 # Default capacity if road type not found
+class DataHandler:
+    def __init__(self):
+        self.config = Config.from_yaml()
+        self.geojson = {}
 
-# Traffic convergence threshold
-CONVERGENCE_THRESHOLD = 0.005 # .5% change
+    def load_data(self, edge_flows_path):
+        """ Load edge flows data in GeoJSON """
 
-# Speed limits by road type (km/h), assumed
-SPEED_LIMITS = {
-    "trunk": 100,
-    "primary": 70,
-    "secondary": 60,
-    "tertiary": 50,
-    "residential": 40,
-    "living_street": 30,
-    "unclassified": 30,
-    "service": 20,
-}
-DEFAULT_SPEED_LIMIT = 50
-
-VC_CAP = 3.00 # Cap v/c to 3.00 
-
-class CongestionFeedbackLoop:
-    """
-    Implements the congestion feedback loop with multi-class traffic assignment
-    as described in sections F and G of the README.
-    """
-    
-    def __init__(self, geojson_path: str):
-        """
-        Initialize with the road network GeoJSON.
-        
-        Args:
-            geojson_path: Path to the GeoJSON file containing road network
-        """
-        with open(geojson_path, 'r') as f:
+        with open(edge_flows_path, 'r') as f:
             self.geojson = json.load(f)
+
+    @staticmethod
+    def save_results(geojson: Dict, output_path: str):
+        """ Save the results to a GeoJSON file. """
+
+        with open(output_path, 'w') as f:
+            json.dump(geojson, f, indent=2)
         
-        self.edges = self.geojson['features']
-        
-        self.road_capacities = ROAD_CAPACITIES
-        self.speed_limits = SPEED_LIMITS
-    
+        print(f"\nResults saved to: {output_path}")
+
+    @staticmethod
+    def caching(temp_path, data):
+        with open(temp_path, 'w') as f:
+            json.dump(data, f)
+
+    @staticmethod
+    def clear_cache(temp_path):
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+
+class NetworkAnalyst:
+    def __init__(self):
+        self.config = Config.from_yaml()
+        self.free_flow_time: Optional[float] = None
+        self.road_capacity: Optional[float] = None
+        self.effective_volume: Optional[float] = None
+
     def calculate_free_flow_time(self, edge: Dict) -> float:
-        """
-        Calculate free-flow travel time for an edge.
+        """ Calculate free-flow travel time for an edge. """
         
-        Args:
-            edge: Edge feature dictionary
-            
-        Returns:
-            Free-flow travel time in seconds
-        """
         length_m = edge['properties']['length_m']
         highway_type = edge['properties']['highway']
 
@@ -85,85 +85,67 @@ class CongestionFeedbackLoop:
                 highway_type = None
         
         # Get speed limit
-        speed_kmh = self.speed_limits.get(highway_type, DEFAULT_SPEED_LIMIT)
+        speed_kmh = self.config.speed_limits.get(highway_type, self.config.default_speed_limit)
         
         # Convert to m/s
         speed_ms = speed_kmh * 1000 / 3600
         
         # Calculate free-flow time (seconds)
         free_flow_time = length_m / speed_ms
+        self.free_flow_time = free_flow_time
         
-        return free_flow_time
+        return self.free_flow_time
     
     def get_road_capacity(self, edge: Dict) -> float:
-        """
-        Get the capacity for a given road type.
+        """ Get the capacity for a given road type. """
         
-        Args:
-            edge: Edge feature dictionary
-            
-        Returns:
-            Road capacity in PCU/hour
-        """
         highway_type = edge['properties']['highway']
         
         # Handle cases where highway type might be a list
         if isinstance(highway_type, list):
-            # Take the first element and ensure it's a string
             if highway_type and isinstance(highway_type[0], str):
                 highway_type = highway_type[0]
             else:
-                # If it's an empty list or not a string, use default
-                return DEFAULT_CAPACITY
+                return self.config.default_capacity
         elif not isinstance(highway_type, str):
-            # If it's not a string or list, use default
-            return DEFAULT_CAPACITY
+            return self.config.default_capacity
         
-        return self.road_capacities.get(highway_type, DEFAULT_CAPACITY)
-    
+        self.road_capacity = self.config.road_capacities.get(highway_type, self.config.default_capacity)
+        return self.road_capacity
+
     def calculate_effective_volume(self, car_flow: float, motorbike_flow: float) -> float:
-        """
-        Calculate effective traffic volume using Passenger Car Units (PCU).
-        
-        Args:
-            car_flow: Car traffic volume
-            motorbike_flow: Motorbike traffic volume
-            
-        Returns:
-            Effective volume in PCU
-        """
-        return car_flow + (PCU_FACTOR * motorbike_flow)
-    
+        """ Calculate effective traffic volume using Passenger Car Units (PCU). """
+
+        return car_flow + (self.config.motorbike_pcu * motorbike_flow)
+
+
+class CongestionEngine:
+    def __init__(self, config: Config):
+        self.config = config
+        self.congested_time: Optional[float] = None
+        self.updated_edges: Optional[List[Dict]] = None
+
+        self.network_analyst = NetworkAnalyst()
+        self.data_handler = DataHandler()
+        self.impedance_calculator = ImpedanceCalculator(self.config)
+        self.graph_manager = GraphManager()
+        self.sparse_grapher = SparseGraphBuilder()
+        self.router = Router(self.config)
+        self.routing_module = VectorRouter()
+        self.flow_Analyzer = FlowAnalyzer(self.config)
+
     def bpr_function(self, t0: float, v: float, c: float, alpha: float, beta: float) -> float:
-        """
-        Bureau of Public Roads (BPR) function for congestion modeling.
-        
-        Args:
-            t0: Free-flow travel time
-            v: Traffic volume (PCU)
-            c: Road capacity (PCU/hour)
-            alpha: BPR alpha parameter
-            beta: BPR beta parameter
-            
-        Returns:
-            Congested travel time
-        """
+        """ Bureau of Public Roads (BPR) function for congestion modeling. """
+
         if c <= 0:
             return t0
         
         vc_ratio = v / c
-        return t0 * (1 + alpha * min((vc_ratio ** beta), VC_CAP))
+        self.congested_time = t0 * (1 + alpha * min((vc_ratio ** beta), self.config.vc_cap))
+        return self.congested_time
     
     def update_congestion(self, edges: List[Dict]) -> List[Dict]:
-        """
-        Update congestion levels for all edges based on current flows.
-        
-        Args:
-            edges: List of edge features with current flow data
-            
-        Returns:
-            Updated edges with new travel times
-        """
+        """ Update congestion levels for all edges based on current flows. """
         updated_edges = []
         
         for i, edge in enumerate(edges):
@@ -173,20 +155,19 @@ class CongestionFeedbackLoop:
             car_flow = props.get('car_flow', 0)
             motorbike_flow = props.get('motorbike_flow', 0) 
             
-            # Calculate effective volume
-            effective_volume = self.calculate_effective_volume(car_flow, motorbike_flow)
+            effective_volume = self.network_analyst.calculate_effective_volume(car_flow, motorbike_flow)
             
             # Get free-flow time and capacity
-            free_flow_time = self.calculate_free_flow_time(edge)
-            capacity = self.get_road_capacity(edge)
+            free_flow_time = self.network_analyst.calculate_free_flow_time(edge)
+            capacity = self.network_analyst.get_road_capacity(edge)
                         
             # Calculate travel times
             car_travel_time = self.bpr_function(
-                free_flow_time, effective_volume, capacity, CAR_ALPHA, CAR_BETA
+                free_flow_time, effective_volume, capacity, self.config.bpr['car']['alpha'], self.config.bpr['car']['beta']
             )
             
             motorbike_travel_time = self.bpr_function(
-                free_flow_time, effective_volume, capacity, MOTORBKE_ALPHA, MOTORBIKE_BETA
+                free_flow_time, effective_volume, capacity, self.config.bpr['motorbike']['alpha'], self.config.bpr['motorbike']['beta']
             )
             
             # Store updated travel times
@@ -201,19 +182,11 @@ class CongestionFeedbackLoop:
             updated_edge['properties'] = updated_props
             updated_edges.append(updated_edge)
         
+        self.updated_edges = updated_edges
         return updated_edges
     
     def check_convergence(self, old_edges: List[Dict], new_edges: List[Dict]) -> bool:
-        """
-        Check if the assignment has converged.
-        
-        Args:
-            old_edges: Previous iteration's edges
-            new_edges: Current iteration's edges
-            
-        Returns:
-            True if converged, False otherwise
-        """
+        """ Check if the assignment has converged. """
         max_change = 0
         total_change = 0
         checked_edges = 0
@@ -230,7 +203,7 @@ class CongestionFeedbackLoop:
             old_bike_time = old_props.get('motorbike_travel_time', 0)
             new_bike_time = new_props.get('motorbike_travel_time', 0)
             
-            # Check flows (important for detecting rerouting)
+            # Check flows for detecting rerouting
             old_car_flow = old_props.get('car_flow', 0)
             new_car_flow = new_props.get('car_flow', 0)
             
@@ -249,50 +222,40 @@ class CongestionFeedbackLoop:
         
         avg_change = total_change / max(1, checked_edges)
         
-        # Print debug info
-        print(f"    Convergence check: max_change={max_change:.4f}, avg_change={avg_change:.4f}, threshold={CONVERGENCE_THRESHOLD}")
+        print(f"    Convergence check: max_change={max_change:.4f}, avg_change={avg_change:.4f}, threshold={self.config.convergence_threshold}")
         
-        return max_change < CONVERGENCE_THRESHOLD
+        return max_change < self.config.convergence_threshold
     
-    def adjust_flows_based_on_congestion(self, edges: List[Dict], routing_module, iteration) -> List[Dict]:
-        """
-        Re-route OD flows using updated travel times.
-        
-        Args:
-            edges: Current edges with congestion
-            routing_module: VectorRouter instance for re-routing
-                
-        Returns:
-            Edges with re-routed flows
-        """
+    def adjust_flows_based_on_congestion(self, edges: List[Dict], iteration) -> List[Dict]:
+        """ Re-route OD flows using updated travel times. """
+
         print("  Re-routing based on updated travel times...")
         
         # Save current congestion state to temporary file
-        temp_geojson = "temp_congestion.geojson"
         temp_data = {
             'type': 'FeatureCollection',
             'features': edges
         }
         
-        with open(temp_geojson, 'w') as f:
-            json.dump(temp_data, f)
+        self.data_handler.caching(self.config.cache_paths['congetsion'], data=temp_data)
         
         # Update routing module with new travel times
-        routing_module.update_impedances_from_congestion(temp_geojson)
-        routing_module.rebuild_sparse_graphs()
+        self.impedance_calculator.update_impedances_from_congestion(self.config.cache_paths['congetsion'])
+        self.sparse_grapher.build_sparse_graph(self.graph_manager.graph, "car")
+        self.sparse_grapher.build_sparse_graph(self.graph_manager.graph, "motorbike")
         
         # Clear previous flows
-        routing_module.edge_flows.clear()
+        self.router.edge_flows.clear()
         
         # Re-route both vehicle types
         print("  Re-routing car trips...")
-        routing_module.process_car()
+        self.routing_module.process_vehicle_type("car")
         
         print("  Re-routing motorbike trips...")
-        routing_module.process_motorbike()
+        self.routing_module.process_vehicle_type("motorbike")
 
-        pcu_km_by_edge, _ = routing_module.calculate_pcu_km()   
-        gini = routing_module.calculate_gini_coefficient(list(pcu_km_by_edge.values()))
+        pcu_km_by_edge, _ = self.flow_Analyzer.calculate_pcu_km(self.router.edge_flows, self.graph_manager.graph) 
+        gini = self.flow_Analyzer.calculate_gini_coefficient(list(pcu_km_by_edge.values())) 
         print(f"Gini coffecient for iteration {iteration+1}: {float(gini)}")  
         
         # Create a more robust edge ID lookup
@@ -314,7 +277,7 @@ class CongestionFeedbackLoop:
         
         # Update edges with new flows
         updated_edges = []
-        edge_flows = routing_module.edge_flows
+        edge_flows = self.router.edge_flows
         
         if not edge_flows:
             print("  WARNING: No edge flows returned from routing!")
@@ -363,16 +326,19 @@ class CongestionFeedbackLoop:
         print(f"  DEBUG: Matched {matched_count} edges, {unmatched_count} unmatched")
         
         # Clean up temp file
-        if os.path.exists(temp_geojson):
-            os.remove(temp_geojson)
+        self.data_handler.clear_cache(self.config.cache_paths['congestion'])
 
+        self.updated_edges = updated_edges
         gc.collect()    
         return updated_edges
     
+
+class Analytics:
+    def __init__(self):
+        self.config = Config.from_yaml()
+
     def calculate_statistics(self, edges: List[Dict]):
-        """
-        Calculate and print summary statistics including mean and median travel times.
-        """
+        """ Calculate and print summary statistics including mean and median travel times. """
         import statistics
 
         car_times = []
@@ -431,16 +397,90 @@ class CongestionFeedbackLoop:
         print(f"  Median:  {med_bike:.2f}s")
         print(f"  Weighted Average: {weighted_bike:.2f}s (based on flow)")
         print("="*50)
+
+class CongestionFeedbackLoop:
+    """ 
+    Main orchestrator class that coordinates all components.
+    Implements the congestion feedback loop with multi-class traffic assignment
+    as described in sections F and G of the README. """
     
-    def save_results(self, geojson: Dict, output_path: str):
-        """
-        Save the results to a GeoJSON file.
-        
-        Args:
-            geojson: GeoJSON data to save
-            output_path: Output file path
-        """
-        with open(output_path, 'w') as f:
-            json.dump(geojson, f, indent=2)
-        
-        print(f"\nResults saved to: {output_path}")
+    def __init__(self, config = Config):
+        self.config = config
+        self.data_handler = DataHandler()
+        self.congestion_engine = CongestionEngine(self.config)
+        self.graph_manager = GraphManager()
+        self.analytics = Analytics()
+
+        self.edges = {}
+        self.updated_edges = {}
+        self.geojson = {}
+
+    def load_edge_flows(self, path):
+        self.geojson = self.data_handler.load_data(path)
+        self.edges = self.geojson['features']
+
+    def load_network(self, force_download: bool = False) -> None:
+        self.graph_manager.load_network(force_download)
+
+    def calculate_congestion(self) :
+        current_edges = self.edges.copy()
+        self.updated_edges = self.congestion_engine.update_congestion(current_edges)
+    
+    def re_route(self, iteration: int) -> List[Dict]:
+        re_routed_edges = self.congestion_engine.adjust_flows_based_on_congestion(
+                self.updated_edges, iteration
+            )
+        return re_routed_edges
+    
+    def update_congestion(self):
+        self.edges = self.re_route()
+
+    def check_convergence(self) -> bool:
+        return self.congestion_engine.check_convergence(self.edges, self.updated_edges)
+    
+    def calculate_statistics(self):
+        self.analytics.calculate_statistics(edges=self.updated_edges)
+    
+    def save_results(self):
+        self.data_handler.save_results(self.geojson, self.config.export_paths['congestion'])
+
+
+def main():
+    config = Config.from_yaml()
+    congestion = CongestionFeedbackLoop(config)
+    router = VectorRouter()
+
+    router.load_data()
+    router.load_network(force_download=False)
+    router.precompute_nearest_nodes(force=False)
+    router.process_all(output_file=config.cache_paths['congestion'])
+
+    print(f"\n{'='*60}")
+    print(f"STARTING CONGESTION FEEDBACK LOOP ({config.congestion_iterations} iterations)")
+    print('='*60)
+    start_time = time.time()
+
+    for iteration in range(config.congestion_iterations):
+        congestion.update_congestion()
+        congestion.re_route(iteration)
+
+        if iteration > 0:
+            if congestion.check_convergence():
+                print(f"\nConverged after {iteration + 1} iterations!")
+                break
+
+        elapsed = time.time() - start_time
+        print(f"  Iteration completed in {elapsed:.1f} seconds")
+
+    print(f"\n{'='*60}")
+    print("FEEDBACK LOOP COMPLETE")
+    print('='*60)
+
+    congestion.calculate_statistics()
+    congestion.save_results()
+    
+    
+    
+if __name__ == "__main__":
+    main()
+    

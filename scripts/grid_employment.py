@@ -1,24 +1,24 @@
-import osmnx as ox
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
-from shapely.geometry import Polygon, Point
-import pandas as pd
+from shapely.geometry import Polygon
 import rasterio
 from rasterio.mask import mask
-from shapely.geometry import box
 import warnings
-import json
-from shapely.geometry import shape
+import yaml
+from types import SimpleNamespace
 warnings.filterwarnings('ignore')
 
-place = "Yogyakarta, Indonesia"
+# Configurations
+with open("config.yaml") as f:
+    config_dict = yaml.safe_load(f)
+    cfg = SimpleNamespace(**{k: SimpleNamespace(**v) if isinstance(v, dict) else v 
+                           for k, v in config_dict.items()})
 
 def employment_analysis():
-    print("Starting Yogyakarta enhanced origin analysis...")
+    print("Starting the employment analysis...")
     
-    # Get boundary of DIY
-    boundary_gdf = gpd.read_file('data/raw/Yogyakarta.geojson')  
+    boundary_gdf = gpd.read_file(cfg.data_paths.boundary)  
 
     if boundary_gdf.crs != 'EPSG:32749':
         boundary_gdf = boundary_gdf.to_crs(epsg=32749)
@@ -26,8 +26,7 @@ def employment_analysis():
     boundary = boundary_gdf
     west, south, east, north = boundary.total_bounds
     
-    # Create grid
-    cell_size = 1000  # meter
+    cell_size = cfg.cell_size
     cols = np.arange(west, east, cell_size)
     rows = np.arange(south, north, cell_size)
     
@@ -45,17 +44,16 @@ def employment_analysis():
     grid['cell_id'] = range(len(grid))
     
     # Initialize intensity scores
-    grid['ghsl_intensity'] = 0  # From GHSL
-    grid['viirs_intensity'] = 0      # From VIIRS
+    grid['ghsl_intensity'] = 0  
+    grid['viirs_intensity'] = 0      
     grid['employment_intensity'] = 0   # Combined score
     
     print(f"Created {len(grid)} grid cells")
     
-    # RESIDENTIAL INTENSITY (from GHSL)
+    # Employment analysis, inferred from GHSL and VIIRS
     print("Getting employment intensity from GHSL...")
     try:
-        reprojected_path = "data/raw/GHSL/Cropped_GHS_BUILT_V_NRES_E2025_GLOBE_R2023A_32749_3ss_V1_0_R10_C30.tif"
-        with rasterio.open(reprojected_path) as src:
+        with rasterio.open(cfg.data_paths.ghsl) as src:
             employment_scores = []
             
             for idx, row in grid.iterrows():
@@ -107,7 +105,7 @@ def employment_analysis():
     # combined = 2 * ((ghsl_norm * viirs_norm/ghsl_norm + viirs_norm + 0.00001))
 
     # Combined score using weighted linear
-    combined = (ghsl_norm * 0.6) + (viirs_norm * 0.4)
+    combined = (ghsl_norm * cfg.grid_weights.ghsl) + (viirs_norm * cfg.gris_weights.viirs)
     
     # Log1p transformation on combined data
     grid['employment_intensity'] = combined 
@@ -132,9 +130,7 @@ def load_viirs_data(grid, boundary):
     print("Getting VIIRS nighttime lights data...")
     
     try:
-        viirs_path = "data/raw/VIIRS/Cropped_reproj_VNL_npp_2024_global_vcmslcfg_v2_c202502261200.average_masked.dat.tif"  
-        
-        with rasterio.open(viirs_path) as src:
+        with rasterio.open(cfg.data_paths.viirs) as src:
             viirs_scores = []
             
             for idx, row in grid.iterrows():
@@ -181,7 +177,7 @@ def load_viirs_data(grid, boundary):
 
 grid, boundary = employment_analysis()
 
-# Plot results - 3 subplots
+# Plot results 
 fig, axes = plt.subplots(1, 3, figsize=(24, 8))
 
 # Plot 1: GHSL Employment Intensity
@@ -200,15 +196,15 @@ grid.plot(column='employment_intensity', cmap='viridis', legend=True, ax=axes[2]
 axes[2].set_title('Combined Intensity (sqrt(GHSL) * sqrt(VIIRS))', fontsize=14)
 
 plt.tight_layout()
-plt.savefig('data/figures/employment_1000m.png', dpi=300, bbox_inches='tight')
+plt.savefig(cfg.figure_paths.employment, dpi=300, bbox_inches='tight')
 plt.show()
 
 # Save data to geojson
 export_gdf = grid.copy()
 export_gdf['geometry'] = export_gdf.geometry.centroid
 export_gdf = export_gdf.to_crs(epsg=4326)  # To match mapbox's system
-export_gdf.to_file('data/raw/employment_1000m.geojson', driver='GeoJSON')
-print("Data saved to 'data/raw/employment_1000m.geojson'")
+export_gdf.to_file(cfg.export_paths.employment, driver='GeoJSON')
+print(cfg.export_paths.employment)
 
 # Print statistics
 print("\n=== STATISTICS ===")

@@ -1,33 +1,22 @@
-import osmnx as ox
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
 from shapely.geometry import Polygon
-import pandas as pd
 import warnings
+import yaml
+from types import SimpleNamespace
 warnings.filterwarnings('ignore', message='Could not parse column')
 
-# Configuration
-PLACE = "Yogyakarta, Indonesia"
-CELL_SIZE = 1000  # meters
+# Configurations
+with open("config.yaml") as f:
+    config_dict = yaml.safe_load(f)
+    cfg = SimpleNamespace(**{k: SimpleNamespace(**v) if isinstance(v, dict) else v 
+                           for k, v in config_dict.items()})
+
 CRS_PROJECTED = 32749  # UTM 49S
 CRS_GEOGRAPHIC = 4326  # WGS84
-DATA_PATH = 'data/raw/Overture/cropped_filtered_overture.geojson'
-PLOT_OUTPUT_PATH = 'data/figures/amenity_1000m.png'
-
-# might want to rethink this, bcs intensity are from how many buildings are there in a grid, not how big
-WORSHIP_SCALE = 'log1p'  # Whatever is closer mindset
-COMMERCIAL_NHB_SCALE = 'sqrt' # Closer is better (why bother going to shopping mall when theres lunch in the nearby street vendors)
-COMMERCIAL_HBNW_SCALE = 'linear' # Bigger spot attracts more people (they have more to offer)
-LEISURE_SCALE = 'linear' # Bigger spot attracts more people
-SERVICE_SCALE = 'sqrt' # Linear's so skewed (few grid at 70 - 100 intensity, while the rest at 25 - 30)
-
 
 def create_grid(boundary_gdf, cell_size=1000):
-    
-    # Get boundary of DIY
-    boundary_gdf = gpd.read_file('data/raw/Yogyakarta.geojson')  
-
     if boundary_gdf.crs != 'EPSG:32749':
         boundary_gdf = boundary_gdf.to_crs(epsg=32749)
 
@@ -94,7 +83,7 @@ def calculate_intensity(grid, places_gdf, intensity_column, scale: str):
 
 def load_overture_data(categories, category_name):
     try:
-        overture_gdf = gpd.read_file(DATA_PATH)
+        overture_gdf = gpd.read_file(cfg.data_paths.overture)
         filtered = overture_gdf[overture_gdf['basic_category'].isin(categories)].copy()
         print(f"Found {len(filtered)} {category_name}")
         return filtered
@@ -117,7 +106,7 @@ def analyze_place_of_worship(grid):
     worship_places = load_overture_data(worship_categories, "places of worship")
     
     if worship_places is not None:
-        grid = calculate_intensity(grid, worship_places, 'place_of_worship_intensity', scale=WORSHIP_SCALE)
+        grid = calculate_intensity(grid, worship_places, 'place_of_worship_intensity', scale=cfg.scales.worship)
     else:
         grid['place_of_worship_intensity'] = 0
     
@@ -149,7 +138,7 @@ def analyze_commercial_nhb(grid):
     commercial_places = load_overture_data(commercial_categories, "commercial places (Non Home Based)")
     
     if commercial_places is not None:
-        grid = calculate_intensity(grid, commercial_places, 'commercial_intensity_nhb', scale=COMMERCIAL_NHB_SCALE) 
+        grid = calculate_intensity(grid, commercial_places, 'commercial_intensity_nhb', scale=cfg.scales.commercial_nhb) 
     else:
         grid['commercial_intensity_nhb'] = 0
     
@@ -199,7 +188,7 @@ def analyze_commercial_hbnw(grid):
     commercial_places = load_overture_data(commercial_categories, "commercial places (Home Based Non Work)")
     
     if commercial_places is not None:
-        grid = calculate_intensity(grid, commercial_places, 'commercial_intensity_hbnw', scale=COMMERCIAL_HBNW_SCALE)
+        grid = calculate_intensity(grid, commercial_places, 'commercial_intensity_hbnw', scale=cfg.scales.commercial_hbnw)
     else:
         grid['commercial_intensity_hbnw'] = 0
     
@@ -250,7 +239,7 @@ def analyze_leisure(grid):
     leisure_places = load_overture_data(leisure_categories, "leisure places")
     
     if leisure_places is not None:
-        grid = calculate_intensity(grid, leisure_places, 'leisure_intensity', scale=LEISURE_SCALE)
+        grid = calculate_intensity(grid, leisure_places, 'leisure_intensity', scale=cfg.scales.leisure)
     else:
         grid['leisure_intensity'] = 0
     
@@ -274,7 +263,7 @@ def analyze_services(grid):
     service_places = load_overture_data(service_categories, "service places")
     
     if service_places is not None:
-        grid = calculate_intensity(grid, service_places, 'service_intensity', scale=SERVICE_SCALE)
+        grid = calculate_intensity(grid, service_places, 'service_intensity', scale=cfg.scales.service)
     else:
         grid['service_intensity'] = 0
     
@@ -283,17 +272,15 @@ def analyze_services(grid):
 def combine_intensities(grid):
     print("\n=== Combining Intensities ===")
     
-    # NHB (Non-Home Based): commercial NHB + worship
     grid['amenity_nhb_intensity'] = (
-        (grid['commercial_intensity_nhb'] * 0.4) + 
-        (grid['place_of_worship_intensity'] * 0.6)
+        (grid['commercial_intensity_nhb'] * cfg.grid_weights.commercial_nhb) + 
+        (grid['place_of_worship_intensity'] * cfg.grid_weights.worship)
     )
     
-    # HBNW (Home-Based Non-Work): commercial HBNW + leisure + service
     grid['amenity_hbnw_intensity'] = (
-        (grid['commercial_intensity_hbnw'] * 0.3) + 
-        (grid['leisure_intensity'] * 0.3) + 
-        (grid['service_intensity'] * 0.4)
+        (grid['commercial_intensity_hbnw'] * cfg.grid_weights.commercial_hbnw) + 
+        (grid['leisure_intensity'] * cfg.grid_weights.leisure) + 
+        (grid['service_intensity'] * cfg.grid_weights.service)
     )
     
     # Normalize each to 0-100 scale
@@ -339,13 +326,12 @@ def plot_results(grid, boundary):
         axes[row, col].set_title(title, fontsize=14)
         axes[row, col].axis('off')
     
-    # Hide the empty subplot
     axes[1, 3].axis('off')
     
     plt.tight_layout()
-    plt.savefig(PLOT_OUTPUT_PATH, dpi=300, bbox_inches='tight')
+    plt.savefig(cfg.figure_paths.service_amenity, dpi=300, bbox_inches='tight')
     plt.show()
-    print(f"\nFigure saved to '{PLOT_OUTPUT_PATH}'")
+    print(f"\nFigure saved to '{cfg.figure_paths.service_amenity}'")
 
 def print_statistics(grid):
     print("\n=== STATISTICS ===")
@@ -409,13 +395,13 @@ def print_statistics(grid):
         print(f"Average service intensity (non-zero cells): {service_nonzero.mean():.2f}")
 
     # Some more
-    print(f"Place of worship scale: {WORSHIP_SCALE}")
-    print(f"Commercial (NHB) scale: {COMMERCIAL_NHB_SCALE}")
-    print(f"Commercial (HBNW) scale: {COMMERCIAL_HBNW_SCALE}")
-    print(f"leisure scale: {LEISURE_SCALE}")
-    print(f"Service scale: {SERVICE_SCALE}")
+    print(f"Place of worship scale: {cfg.scales.worship}")
+    print(f"Commercial (NHB) scale: {cfg.scales.commercial_nhb}")
+    print(f"Commercial (HBNW) scale: {cfg.scales.commercial_hbnw}")
+    print(f"leisure scale: {cfg.scales.leisure}")
+    print(f"Service scale: {cfg.scales.service}")
 
-def export_to_geojson(grid, output_path='data/raw/services_amenities_1000m.geojson'):
+def export_to_geojson(grid, output_path=cfg.export_paths.service_amenity):
     export_gdf = grid.copy()
     export_gdf['geometry'] = export_gdf.geometry.centroid
     export_gdf = export_gdf.to_crs(epsg=CRS_GEOGRAPHIC)
@@ -424,15 +410,12 @@ def export_to_geojson(grid, output_path='data/raw/services_amenities_1000m.geojs
 
 
 def main():
-    print(f"Starting analysis for {PLACE}")
+    print(f"Starting analysis...")
     
-    # Get boundary
-    boundary = ox.geocode_to_gdf(PLACE)
+    boundary = gpd.read_file(cfg.data_paths.boundary)  
     
-    # Create grid
-    grid = create_grid(boundary, CELL_SIZE)
+    grid = create_grid(boundary, cfg.cell_size)
     
-    # Perform analyses
     grid = analyze_place_of_worship(grid)
     grid = analyze_commercial_nhb(grid)
     grid = analyze_commercial_hbnw(grid)
@@ -440,10 +423,8 @@ def main():
     grid = analyze_services(grid)
     grid = combine_intensities(grid)
     
-    # Visualize
     plot_results(grid, boundary)
     
-    # Statistics
     print_statistics(grid)
     
     export_to_geojson(grid)

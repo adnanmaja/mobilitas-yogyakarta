@@ -1,20 +1,23 @@
-import osmnx as ox
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
-from shapely.geometry import Polygon, Point
-import pandas as pd
+from shapely.geometry import Polygon
 import rasterio
 from rasterio.mask import mask
-from shapely.geometry import box
+import yaml
+from types import SimpleNamespace
 
-place = "Yogyakarta, Indonesia"
-
+# Configurations
+with open("config.yaml") as f:
+    config_dict = yaml.safe_load(f)
+    cfg = SimpleNamespace(**{k: SimpleNamespace(**v) if isinstance(v, dict) else v 
+                           for k, v in config_dict.items()})
+    
 def residential_analysis():
     print("Starting Yogyakarta enhanced origin analysis...")
     
-    # Get boundary of DIY
-    boundary_gdf = gpd.read_file('data/raw/Yogyakarta.geojson')  
+    # DIY Boundary
+    boundary_gdf = gpd.read_file(cfg.data_paths.boundary)  
 
     if boundary_gdf.crs != 'EPSG:32749':
         boundary_gdf = boundary_gdf.to_crs(epsg=32749)
@@ -22,8 +25,7 @@ def residential_analysis():
     boundary = boundary_gdf
     west, south, east, north = boundary.total_bounds
     
-    # Create grid
-    cell_size = 1000  # meter
+    cell_size = cfg.cell_size
     cols = np.arange(west, east, cell_size)
     rows = np.arange(south, north, cell_size)
     
@@ -41,15 +43,14 @@ def residential_analysis():
     grid['cell_id'] = range(len(grid))
     
     # Initialize intensity scores
-    grid['residential_intensity'] = 0  # From WorldPop
+    grid['residential_intensity'] = 0  
     
     print(f"Created {len(grid)} grid cells")
     
-    # RESIDENTIAL INTENSITY (from WorldPop)
+    # Residential intensity, inferred from WorldPop
     print("Getting residential intensity from WorldPop...")
     try:
-        reprojected_path = "data/raw/Worldpop/clipped_utm49s_2025_yogyakarta_100m.tif"
-        with rasterio.open(reprojected_path) as src:
+        with rasterio.open(cfg.data_paths.worldpop) as src:
             residential_scores = []
             
             for idx, row in grid.iterrows():
@@ -77,7 +78,7 @@ def residential_analysis():
         print(f"Error getting population data: {e}")
     
 
-    print("Analysis complete!")
+    print("Complete!")
 
     return grid, boundary
 
@@ -89,32 +90,30 @@ fig, ax = plt.subplots(1, 1, figsize=(18, 12))
 boundary.boundary.plot(ax=ax, color='black', linewidth=1, alpha=0.5) # Boundary outline
 
 grid.plot(column='residential_intensity', cmap='Reds', legend=True, ax=ax)
-ax.set_title('Residential Intensity (WorldPop)', fontsize=16)
+ax.set_title('Residential Intensity', fontsize=16)
 
 plt.tight_layout()
-plt.savefig('data/figures/residential_1000m.png', dpi=300, bbox_inches='tight')
+plt.savefig(cfg.figure_paths.resdidential, dpi=300, bbox_inches='tight')
 plt.show()
 
 # Save data to geojson
 export_gdf = grid.copy()
 export_gdf['geometry'] = export_gdf.geometry.centroid
 export_gdf = export_gdf.to_crs(epsg=4326)  # To match mapbox's system
-export_gdf.to_file('data/raw/residential_1000m.geojson', driver='GeoJSON')
-print("Data saved to 'data/raw/residential_1000m.geojson'")
+export_gdf.to_file(cfg.export_paths.residential, driver='GeoJSON')
+print(cfg.export_paths.residential)
 
-# Print statistics
+# Print some statistics
 print("\n=== STATISTICS ===")
 print(f"Total grid cells: {len(grid)}")
 print(f"Residential intensity range: {grid['residential_intensity'].min():.1f} - {grid['residential_intensity'].max():.1f}")
 print(f"Cells with residential intensity > 0: {(grid['residential_intensity'] > 0).sum()}")
 
-# Find top intensity cells for each category
 categories = ['residential_intensity']
 for category in categories:
     top_cells = grid.nlargest(3, category)[['cell_id', category]]
     print(f"\nTop 3 {category}:")
     print(top_cells.to_string(index=False))
 
-# Additional analysis
 print(f"Average residential intensity: {grid['residential_intensity'].mean():.2f}")
 
