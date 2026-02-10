@@ -5,13 +5,11 @@ from shapely.geometry import Polygon
 import warnings
 import yaml
 from types import SimpleNamespace
+from scripts.grids.grid_config import Config
 warnings.filterwarnings('ignore', message='Could not parse column')
 
 # Configurations
-with open("config.yaml") as f:
-    config_dict = yaml.safe_load(f)
-    cfg = SimpleNamespace(**{k: SimpleNamespace(**v) if isinstance(v, dict) else v 
-                           for k, v in config_dict.items()})
+config = Config.from_yaml()
 
 CRS_PROJECTED = 32749  # UTM 49S
 CRS_GEOGRAPHIC = 4326  # WGS84
@@ -83,7 +81,7 @@ def calculate_intensity(grid, places_gdf, intensity_column, scale: str):
 
 def load_overture_data(categories, category_name):
     try:
-        overture_gdf = gpd.read_file(cfg.data_paths.overture)
+        overture_gdf = gpd.read_file(config.data_paths['overture'])
         filtered = overture_gdf[overture_gdf['basic_category'].isin(categories)].copy()
         print(f"Found {len(filtered)} {category_name}")
         return filtered
@@ -106,7 +104,7 @@ def analyze_place_of_worship(grid):
     worship_places = load_overture_data(worship_categories, "places of worship")
     
     if worship_places is not None:
-        grid = calculate_intensity(grid, worship_places, 'place_of_worship_intensity', scale=cfg.scales.worship)
+        grid = calculate_intensity(grid, worship_places, 'place_of_worship_intensity', scale=config.scales['worship'])
     else:
         grid['place_of_worship_intensity'] = 0
     
@@ -138,7 +136,7 @@ def analyze_commercial_nhb(grid):
     commercial_places = load_overture_data(commercial_categories, "commercial places (Non Home Based)")
     
     if commercial_places is not None:
-        grid = calculate_intensity(grid, commercial_places, 'commercial_intensity_nhb', scale=cfg.scales.commercial_nhb) 
+        grid = calculate_intensity(grid, commercial_places, 'commercial_intensity_nhb', scale=config.scales['commercial_nhb']) 
     else:
         grid['commercial_intensity_nhb'] = 0
     
@@ -188,7 +186,7 @@ def analyze_commercial_hbnw(grid):
     commercial_places = load_overture_data(commercial_categories, "commercial places (Home Based Non Work)")
     
     if commercial_places is not None:
-        grid = calculate_intensity(grid, commercial_places, 'commercial_intensity_hbnw', scale=cfg.scales.commercial_hbnw)
+        grid = calculate_intensity(grid, commercial_places, 'commercial_intensity_hbnw', scale=config.scales['commercial_hbnw'])
     else:
         grid['commercial_intensity_hbnw'] = 0
     
@@ -239,7 +237,7 @@ def analyze_leisure(grid):
     leisure_places = load_overture_data(leisure_categories, "leisure places")
     
     if leisure_places is not None:
-        grid = calculate_intensity(grid, leisure_places, 'leisure_intensity', scale=cfg.scales.leisure)
+        grid = calculate_intensity(grid, leisure_places, 'leisure_intensity', scale=config.scales['leisure'])
     else:
         grid['leisure_intensity'] = 0
     
@@ -263,7 +261,7 @@ def analyze_services(grid):
     service_places = load_overture_data(service_categories, "service places")
     
     if service_places is not None:
-        grid = calculate_intensity(grid, service_places, 'service_intensity', scale=cfg.scales.service)
+        grid = calculate_intensity(grid, service_places, 'service_intensity', scale=config.scales['service'])
     else:
         grid['service_intensity'] = 0
     
@@ -273,14 +271,14 @@ def combine_intensities(grid):
     print("\n=== Combining Intensities ===")
     
     grid['amenity_nhb_intensity'] = (
-        (grid['commercial_intensity_nhb'] * cfg.grid_weights.commercial_nhb) + 
-        (grid['place_of_worship_intensity'] * cfg.grid_weights.worship)
+        (grid['commercial_intensity_nhb'] * config.grid_weights['commercial_nhb']) + 
+        (grid['place_of_worship_intensity'] * config.grid_weights['worship'])
     )
     
     grid['amenity_hbnw_intensity'] = (
-        (grid['commercial_intensity_hbnw'] * cfg.grid_weights.commercial_hbnw) + 
-        (grid['leisure_intensity'] * cfg.grid_weights.leisure) + 
-        (grid['service_intensity'] * cfg.grid_weights.service)
+        (grid['commercial_intensity_hbnw'] * config.grid_weights['commercial_hbnw']) + 
+        (grid['leisure_intensity'] * config.grid_weights['leisure']) + 
+        (grid['service_intensity'] * config.grid_weights['service'])
     )
     
     # Normalize each to 0-100 scale
@@ -329,9 +327,9 @@ def plot_results(grid, boundary):
     axes[1, 3].axis('off')
     
     plt.tight_layout()
-    plt.savefig(cfg.figure_paths.service_amenity, dpi=300, bbox_inches='tight')
+    plt.savefig(config.figure_paths['service_amenity'], dpi=300, bbox_inches='tight')
     plt.show()
-    print(f"\nFigure saved to '{cfg.figure_paths.service_amenity}'")
+    print(f"\nFigure saved to '{config.figure_paths['service_amenity']}'")
 
 def print_statistics(grid):
     print("\n=== STATISTICS ===")
@@ -395,13 +393,13 @@ def print_statistics(grid):
         print(f"Average service intensity (non-zero cells): {service_nonzero.mean():.2f}")
 
     # Some more
-    print(f"Place of worship scale: {cfg.scales.worship}")
-    print(f"Commercial (NHB) scale: {cfg.scales.commercial_nhb}")
-    print(f"Commercial (HBNW) scale: {cfg.scales.commercial_hbnw}")
-    print(f"leisure scale: {cfg.scales.leisure}")
-    print(f"Service scale: {cfg.scales.service}")
+    print(f"Place of worship scale: {config.scales['worship']}")
+    print(f"Commercial (NHB) scale: {config.scales['commercial_nhb']}")
+    print(f"Commercial (HBNW) scale: {config.scales['commercial_hbnw']}")
+    print(f"leisure scale: {config.scales['leisure']}")
+    print(f"Service scale: {config.scales['service']}")
 
-def export_to_geojson(grid, output_path=cfg.export_paths.service_amenity):
+def export_to_geojson(grid, output_path=config.export_paths['service_amenity']):
     export_gdf = grid.copy()
     export_gdf['geometry'] = export_gdf.geometry.centroid
     export_gdf = export_gdf.to_crs(epsg=CRS_GEOGRAPHIC)
@@ -412,9 +410,9 @@ def export_to_geojson(grid, output_path=cfg.export_paths.service_amenity):
 def main():
     print(f"Starting analysis...")
     
-    boundary = gpd.read_file(cfg.data_paths.boundary)  
+    boundary = gpd.read_file(config.data_paths['boundary'])  
     
-    grid = create_grid(boundary, cfg.cell_size)
+    grid = create_grid(boundary, config.cell_size)
     
     grid = analyze_place_of_worship(grid)
     grid = analyze_commercial_nhb(grid)

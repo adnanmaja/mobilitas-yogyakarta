@@ -16,7 +16,7 @@ This is a proof-of-concept, city-scale traffic simulation developed as a persona
 
 ## Methodology & Pipeline
 ### A. Spatial Framework & Intensity Surfaces
-The Special Region of Yogyakarta (DIY) is discretized into a 1 km × 1 km grid, balancing spatial detail with computational tractability. <br>
+The Special Region of Yogyakarta (DIY) is discretized into a 1 km × 1 km grid (and 500 m × 500 m for visualization), balancing spatial detail with computational tractability. <br>
 Each grid cell is characterized by continuous intensity measures:
 - **Residential Intensity**<br>
 Derived from WorldPop population raster data, representing trip production potential.

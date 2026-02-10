@@ -4,20 +4,15 @@ import numpy as np
 from shapely.geometry import Polygon
 import rasterio
 from rasterio.mask import mask
-import yaml
-from types import SimpleNamespace
+from scripts.grids.grid_config import Config
 
-# Configurations
-with open("config.yaml") as f:
-    config_dict = yaml.safe_load(f)
-    cfg = SimpleNamespace(**{k: SimpleNamespace(**v) if isinstance(v, dict) else v 
-                           for k, v in config_dict.items()})
+config = Config.from_yaml()
     
 def residential_analysis():
     print("Starting Yogyakarta enhanced origin analysis...")
     
     # DIY Boundary
-    boundary_gdf = gpd.read_file(cfg.data_paths.boundary)  
+    boundary_gdf = gpd.read_file(config.data_paths['boundary'])  
 
     if boundary_gdf.crs != 'EPSG:32749':
         boundary_gdf = boundary_gdf.to_crs(epsg=32749)
@@ -25,7 +20,7 @@ def residential_analysis():
     boundary = boundary_gdf
     west, south, east, north = boundary.total_bounds
     
-    cell_size = cfg.cell_size
+    cell_size = config.cell_size
     cols = np.arange(west, east, cell_size)
     rows = np.arange(south, north, cell_size)
     
@@ -50,7 +45,7 @@ def residential_analysis():
     # Residential intensity, inferred from WorldPop
     print("Getting residential intensity from WorldPop...")
     try:
-        with rasterio.open(cfg.data_paths.worldpop) as src:
+        with rasterio.open(config.data_paths['worldpop']) as src:
             residential_scores = []
             
             for idx, row in grid.iterrows():
@@ -93,15 +88,15 @@ grid.plot(column='residential_intensity', cmap='Reds', legend=True, ax=ax)
 ax.set_title('Residential Intensity', fontsize=16)
 
 plt.tight_layout()
-plt.savefig(cfg.figure_paths.resdidential, dpi=300, bbox_inches='tight')
+plt.savefig(config.figure_paths['residential'], dpi=300, bbox_inches='tight')
 plt.show()
 
 # Save data to geojson
 export_gdf = grid.copy()
 export_gdf['geometry'] = export_gdf.geometry.centroid
 export_gdf = export_gdf.to_crs(epsg=4326)  # To match mapbox's system
-export_gdf.to_file(cfg.export_paths.residential, driver='GeoJSON')
-print(cfg.export_paths.residential)
+export_gdf.to_file(config.export_paths['residential'], driver='GeoJSON')
+print(config.export_paths['residential'])
 
 # Print some statistics
 print("\n=== STATISTICS ===")

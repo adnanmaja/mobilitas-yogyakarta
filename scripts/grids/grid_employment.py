@@ -5,20 +5,16 @@ from shapely.geometry import Polygon
 import rasterio
 from rasterio.mask import mask
 import warnings
-import yaml
-from types import SimpleNamespace
+from scripts.grids.grid_config import Config
 warnings.filterwarnings('ignore')
 
 # Configurations
-with open("config.yaml") as f:
-    config_dict = yaml.safe_load(f)
-    cfg = SimpleNamespace(**{k: SimpleNamespace(**v) if isinstance(v, dict) else v 
-                           for k, v in config_dict.items()})
+config = Config.from_yaml()
 
 def employment_analysis():
     print("Starting the employment analysis...")
     
-    boundary_gdf = gpd.read_file(cfg.data_paths.boundary)  
+    boundary_gdf = gpd.read_file(config.data_paths['boundary'])  
 
     if boundary_gdf.crs != 'EPSG:32749':
         boundary_gdf = boundary_gdf.to_crs(epsg=32749)
@@ -26,7 +22,7 @@ def employment_analysis():
     boundary = boundary_gdf
     west, south, east, north = boundary.total_bounds
     
-    cell_size = cfg.cell_size
+    cell_size = config.cell_size
     cols = np.arange(west, east, cell_size)
     rows = np.arange(south, north, cell_size)
     
@@ -53,7 +49,7 @@ def employment_analysis():
     # Employment analysis, inferred from GHSL and VIIRS
     print("Getting employment intensity from GHSL...")
     try:
-        with rasterio.open(cfg.data_paths.ghsl) as src:
+        with rasterio.open(config.data_paths['ghsl']) as src:
             employment_scores = []
             
             for idx, row in grid.iterrows():
@@ -105,7 +101,7 @@ def employment_analysis():
     # combined = 2 * ((ghsl_norm * viirs_norm/ghsl_norm + viirs_norm + 0.00001))
 
     # Combined score using weighted linear
-    combined = (ghsl_norm * cfg.grid_weights.ghsl) + (viirs_norm * cfg.gris_weights.viirs)
+    combined = (ghsl_norm * config.grid_weights['ghsl']) + (viirs_norm * config.grid_weights['viirs'])
     
     # Log1p transformation on combined data
     grid['employment_intensity'] = combined 
@@ -130,7 +126,7 @@ def load_viirs_data(grid, boundary):
     print("Getting VIIRS nighttime lights data...")
     
     try:
-        with rasterio.open(cfg.data_paths.viirs) as src:
+        with rasterio.open(config.data_paths['viirs']) as src:
             viirs_scores = []
             
             for idx, row in grid.iterrows():
@@ -196,15 +192,15 @@ grid.plot(column='employment_intensity', cmap='viridis', legend=True, ax=axes[2]
 axes[2].set_title('Combined Intensity (sqrt(GHSL) * sqrt(VIIRS))', fontsize=14)
 
 plt.tight_layout()
-plt.savefig(cfg.figure_paths.employment, dpi=300, bbox_inches='tight')
+plt.savefig(config.figure_paths['employment'], dpi=300, bbox_inches='tight')
 plt.show()
 
 # Save data to geojson
 export_gdf = grid.copy()
 export_gdf['geometry'] = export_gdf.geometry.centroid
 export_gdf = export_gdf.to_crs(epsg=4326)  # To match mapbox's system
-export_gdf.to_file(cfg.export_paths.employment, driver='GeoJSON')
-print(cfg.export_paths.employment)
+export_gdf.to_file(config.export_paths['employment'], driver='GeoJSON')
+print(config.export_paths['employment'])
 
 # Print statistics
 print("\n=== STATISTICS ===")
