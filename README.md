@@ -93,17 +93,15 @@ Free-flow generalized cost defined as road length multiplied by a mode- and road
 **Behavioral Route Choice Adjustments** <br>
 - **Perception Noise (Stochastic Cost Perturbation)**<br>
     To avoid deterministic shortest-path collapse—where all trips select a single identical route due to perfectly perceived costs—the model introduces small stochastic perturbations to edge costs during routing.
-    <br>
+    
+
     For each origin–destination (OD) routing instance, base edge costs are perturbed as:
 
-    ```math
-    w_e' = w_e \left( 1 + \varepsilon_e \right)
+    <br>
+
+    $w_e' = w_e \left( 1 + \varepsilon_e \right), \qquad \varepsilon_e \sim \mathcal{U}(-\delta_m, +\delta_m) $
     
-    ```
-    with
-    ```math
-    \qquad \varepsilon_e \sim \mathcal{U}(-\delta_m, +\delta_m) 
-    ```
+    <br>
 
     Where:
     - $w_e$ is the base edge cost (road-length multiplied by a mode and road-class-specific constant),
@@ -125,9 +123,6 @@ The number of sampled destinations per distance band is fixed:
 
 - **Mode-specific routing**: Cars and motorbikes are routed separately with different road type preferences
 - **Static assignment**: Initial routing does not incorporate congestion feedback (see section F for congestion iteration)
-
-**Destination Sampling Strategy**<br>
-
 
 ### E. Congestion Modeling
 Congestion is modeled using a Bureau of Public Roads (BPR) function: <br>
