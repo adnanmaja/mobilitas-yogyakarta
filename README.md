@@ -94,7 +94,7 @@ Free-flow generalized cost defined as road length multiplied by a mode- and road
 - **Perception Noise (Stochastic Cost Perturbation)**<br>
     To avoid deterministic shortest-path collapse—where all trips select a single identical route due to perfectly perceived costs—the model introduces small stochastic perturbations to edge costs during routing.
     <br>
-    For each origin–destination (OD) routing instance, base edge costs are perturbed as:
+    For each origin–destination (OD) routing instance, base edge costs are perturbed as:<br>
 
     ```math
     w_e' = w_e \left( 1 + \varepsilon_e \right), \qquad \varepsilon_e \sim \mathcal{U}(-\delta_m, +\delta_m) 
