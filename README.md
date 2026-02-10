@@ -141,9 +141,11 @@ Where: <br>
 
 Key extensions:
 - **Relative Capacity by Road Type**<br>
-Capacities are defined in relative terms (e.g., primary > secondary > tertiary), rather than absolute veh/hr.
+    Capacities are defined in relative terms (e.g., primary > secondary > tertiary), rather than absolute veh/hr.
 - **Utilization Ratios by Trip Type**<br>
-Different trip purposes contribute differently to effective congestion.
+    Different trip purposes contribute differently to effective congestion.
+- **V/C cap**<br>
+    the vehicle-to-capacity ($v/c$) is capped to prevent absurdly high congestion
 
 
 ### F. Congestion Feedback Loop
@@ -228,16 +230,62 @@ The assignment process is implemented as a static iterative loop:
 4. Update mode-specific travel times
 5. Repeat until convergence
 
+## Pipeline Diagram
+```mermaid
+graph TD
+    subgraph "1. Data Input & Spatial Framework"
+        A[WorldPop / GHSL / VIIRS] --> B(Intensity Surfaces)
+        C[Overture Maps POIs] --> B
+        B --> |1km Grid| D{Trip Generation}
+    end
+
+    subgraph "2. Demand Modeling (OD Matrix)"
+        D --> E[HBW: Work Trips]
+        D --> F[HBNW: Amenity Trips]
+        D --> G[NHB: Non-Home Based]
+        E & F & G --> H(Gravity Models)
+        H --> I[Boundary Leakage Adjustment]
+        I --> J[OD Matrix Creation]
+    end
+
+    subgraph "3. Mode & Routing"
+        J --> K[Mode Choice Split]
+        K --> L[Car OD]
+        K --> M[Motorbike OD]
+        L & M --> N[Distance-Stratified Sampling]
+    end
+
+    subgraph "4. Iterative Congestion Loop (MSA)"
+        N --> O[Route Assignment: Dijkstra]
+        O --> P[Aggregate PCU Flow]
+        P --> Q[BPR Function: Travel Time Update]
+        Q --> |Feedback Loop| O
+    end
+
+    subgraph "5. Final Output"
+        Q --> R[Interactive Heatmap / MapLibre]
+    end
+
+    %% Styling
+    style O fill:#f9f,stroke:#333,stroke-width:2px
+    style Q fill:#f9f,stroke:#333,stroke-width:2px
+```
+
 ## Results & Visualization
 The resulting data have been visualized into an interactive map using maplibre. [Check it out!](https://adnanmaja.github.io/mobilitas-yogyakarta) <br>
-Additionally, static figures can be found at ```data/figures```
+Additionally, static figures can be found at ```data/figures``` and statistics at ```data/stats```
 
 ## Limitations & Assumptions
-- **Calibration** : While distance-decay parameters are literature-informed, most other parameters remain heuristic.
-- **Static  Demand** : No within-period demand dynamics or departure-time choice modeling.
-- **Behaviour** : The model uses a simple user-equilibrium (all drivers choose the perceived shortest path). It does not account for driver learning, real-time information, or stochastic variations.
-- **Capacity Representation**: Relative rather than measured capacities; no lane-level or signal modeling.
-- **Grid & Data Resolution** : 1 km grid limits fine-grained neighborhood analysis.
+- **Parameterization** <br>
+    Model parameters are intentionally simplified and not fully calibrated. Capacities are defined in relative terms, and other values are selected to balance realism, stability, and computational cost. The model emphasizes qualitative spatial patterns over quantitative prediction.
+- **Static  Demand**<br> 
+    No within-period demand dynamics or departure-time choice modeling.
+- **Behaviour**<br> 
+    The model uses a simple user-equilibrium (all drivers choose the perceived shortest path). It does not account for driver learning, real-time information, or stochastic variations.
+- **Capacity Representation**<br>
+    Relative rather than measured capacities; no lane-level or signal modeling.
+- **Grid & Data Resolution**<br> 
+    1 km grid limits fine-grained neighborhood analysis.
 
 ## Technical Stack
 - **Languages** : Python, Javascript
@@ -263,3 +311,5 @@ Devi, M. K., et al. (2019). Travel Behavior Pattern in Yogyakarta Urbanized Area
 https://www.researchgate.net/publication/338865315
 
 BPS "Provinsi Daerah Istimewa Yogyakarta Dalam Angka 2025"
+
+

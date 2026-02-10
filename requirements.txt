@@ -27,6 +27,7 @@ geojson==3.2.0
 geopandas==1.1.2
 geopy==2.4.1
 idna==3.11
+igraph==1.0.0
 ijson==3.4.0.post0
 ipyevents==2.0.4
 ipyfilechooser==0.6.0
@@ -50,6 +51,7 @@ maplibre==0.3.6
 MarkupSafe==3.0.3
 matplotlib==3.10.8
 matplotlib-inline==0.2.1
+-e git+https://github.com/adnanmaja/mobilitas-yogyakarta.git@2e4951299f4ed7507584ddede230cf941fb2ec06#egg=mobilitas
 narwhals==2.15.0
 networkx==3.6.1
 numpy==2.4.1
@@ -76,6 +78,7 @@ pystac-client==0.9.0
 python-box==7.3.2
 python-dateutil==2.9.0.post0
 pytz==2025.2
+PyYAML==6.0.3
 rasterio==1.5.0
 referencing==0.37.0
 requests==2.32.5
@@ -88,6 +91,7 @@ shapely==2.1.2
 six==1.17.0
 soupsieve==2.8.1
 stack-data==0.6.3
+texttable==1.7.0
 threadpoolctl==3.6.0
 tqdm==4.67.1
 traitlets==5.14.3
