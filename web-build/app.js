@@ -451,6 +451,7 @@ document.addEventListener('DOMContentLoaded', function() {
       id: 'residential-layer-500m',
       type: 'circle',
       source: 'residential_500',
+      'source-layer': 'default',
       paint: {
         'circle-radius': [
           'interpolate',
@@ -489,6 +490,7 @@ document.addEventListener('DOMContentLoaded', function() {
       id: 'employment-layer-500m',
       type: 'circle',
       source: 'employment_500',
+      'source-layer': 'default',
       paint: {
         'circle-radius': [
           'interpolate',
@@ -526,7 +528,7 @@ document.addEventListener('DOMContentLoaded', function() {
       id: 'hbnw-amenity-layer-500m',
       type: 'circle',
       source: 'amenity_500',
-      // minzoom: 16,
+      'source-layer': 'default',
       paint: {
         'circle-radius': [
           'interpolate',
@@ -558,7 +560,7 @@ document.addEventListener('DOMContentLoaded', function() {
       id: 'nhb-amenity-layer-500m',
       type: 'circle',
       source: 'amenity_500',
-      // minzoom: 16,
+      'source-layer': 'default',
       paint: {
         'circle-radius': [
           'interpolate',
@@ -604,6 +606,7 @@ document.addEventListener('DOMContentLoaded', function() {
       'id': 'peak-flow-layer',
       'type': 'line',
       'source': 'peak-flow-data',
+      'source-layer': 'default',
       'layout': {
         'line-join': 'round',
         'line-cap': 'round'
@@ -613,19 +616,19 @@ document.addEventListener('DOMContentLoaded', function() {
           'interpolate',
           ['linear'],
           ['get', 'total_flow'],
-          0.07966477843001485, 1.2,    // Median: Thin line
-          1.399054811172391, 4,      // 90th Percentile: Medium line
-          37.315249125300056, 12      // Maximum: Very thick line
+          0.07966477843001485, 1.2,    // Median
+          1.399054811172391, 4,      // p90
+          37.315249125300056, 12      // Maximum: 
         ],
         'line-color': [
           'interpolate',
           ['linear'],
           ['get', 'total_flow'],
-          0.07966477843001485, '#34d399', // Median: Green
-          0.6013697411714708, '#fbbf24',   // 80th: Amber
-          1.399054811172391, '#ef4444',   // 90th Percentile: Red
-          2.723173461652838, '#7f1d1d',    // 95th: Deep Red
-          37.315249125300056, '#780ff1' // Max: Purple
+          0.07966477843001485, '#34d399', // Median
+          0.6013697411714708, '#fbbf24',   // p80
+          1.399054811172391, '#ef4444',   // p90 
+          2.723173461652838, '#7f1d1d',    // p95
+          37.315249125300056, '#780ff1' // Max
         ],
         'line-opacity': 0.95
       }
@@ -635,6 +638,7 @@ document.addEventListener('DOMContentLoaded', function() {
       'id': 'off-peak-flow-layer',
       'type': 'line',
       'source': 'off-peak-flow-data',
+      'source-layer': 'default',
       'layout': {
         'line-join': 'round',
         'line-cap': 'round'
@@ -705,7 +709,8 @@ document.addEventListener('DOMContentLoaded', function() {
       'id': 'peak-congestion-layer',
       'type': 'line',
       'source': 'peak-congestion-data',
-      'filter': ['>=', ['get', 'vc_ratio'], 0.10470038663396035], // 70th Percentile
+      'source-layer': 'default',
+      'filter': ['>=', ['get', 'vc_ratio'], 0.10470038663396035], // p70
       'layout': {
         'line-join': 'round',
         'line-cap': 'round',
@@ -716,27 +721,27 @@ document.addEventListener('DOMContentLoaded', function() {
           'interpolate',
           ['linear'],
           ['get', 'vc_ratio'],
-          0.104700386633960358, 1.5,   // 70th Percentile: Thin
-          0.4497026527666784, 4,     // 90th Percentile: Medium
-          0.8355367868226627, 8,     // 95th Percentile: Thick
-          29.087919099787882, 12     // Maximum: Very Thick
+          0.104700386633960358, 1.5,   // p70 
+          0.4497026527666784, 4,     // p90 
+          0.8355367868226627, 8,     // p95 
+          29.087919099787882, 12   // Max 
         ],
         'line-color': [
           'interpolate',
           ['linear'],
           ['get', 'vc_ratio'],
-          0.10470038663396035, '#e67e22', // 70th Percentile: Orange
-          0.20012278191347832, '#e74c3c', // 80th Percentile: Red
-          0.4497026527666784, '#c0392b', // 90th Percentile: Deep Red
-          0.8355367868226627, '#800000', // 95th Percentile: Dark Maroon
-          29.087919099787882, '#780ff1'  // Max: Purple
+          0.10470038663396035, '#e67e22', // p70 
+          0.20012278191347832, '#e74c3c', // p80 
+          0.4497026527666784, '#c0392b', // p90  
+          0.8355367868226627, '#800000', // p95  
+          29.087919099787882, '#780ff1'  // Max
         ],
         'line-opacity': [
           'interpolate',
           ['linear'],
           ['get', 'vc_ratio'],
-          0.10470038663396035, 0.5,   // Start visibility at the new 70th percentile
-          0.4497026527666784, 1      // Full opacity at 90th percentile
+          0.10470038663396035, 0.5,   // p70
+          0.4497026527666784, 1      // p90
         ]
       }
     });
@@ -745,6 +750,7 @@ document.addEventListener('DOMContentLoaded', function() {
       'id': 'off-peak-congestion-layer',
       'type': 'line',
       'source': 'off-peak-congestion-data',
+      'source-layer': 'default',
       'layout': {
         'line-join': 'round',
         'line-cap': 'round'
@@ -776,6 +782,7 @@ document.addEventListener('DOMContentLoaded', function() {
       'id': 'weekend-congestion-layer',
       'type': 'line',
       'source': 'weekend-congestion-data',
+      'source-layer': 'default',
       'layout': {
         'line-join': 'round',
         'line-cap': 'round'
