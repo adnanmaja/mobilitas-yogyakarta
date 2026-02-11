@@ -469,13 +469,48 @@ document.addEventListener('DOMContentLoaded', function() {
           100, '#6ec6ff'
         ],
         'circle-opacity': [
-          'interpolate',
-          ['linear'],
-          ['get', 'residential_intensity'],
-          0, 0.3,
-          100, 0.7
+          'interpolate', ['linear'], ['zoom'],
+          14, 0,  
+          15, 0.7 
         ],
         'circle-blur': 0.5
+      }
+    });
+
+    map.addLayer({
+      id: 'residential-heatmap',
+      type: 'heatmap',
+      source: 'residential_500',
+      paint: {
+        'heatmap-weight': [
+          'interpolate', ['linear'], ['get', 'residential_intensity'],
+          0, 0,
+          100, 1
+        ],
+        'heatmap-intensity': [
+          'interpolate', ['linear'], ['zoom'],
+          11, 1,
+          15, 3
+        ],
+        'heatmap-color': [
+          'interpolate', ['linear'], ['heatmap-density'],
+          0, 'rgba(0, 0, 0, 0)',
+          0.2, '#00429d',
+          0.4, '#4771b2',
+          0.6, '#73a2c6',
+          0.8, '#a5d5d8',
+          1, '#00f2ff' 
+        ],
+        'heatmap-radius': [
+          'interpolate', ['linear'], ['zoom'],
+          11, 15,
+          15, 40
+        ],
+        'heatmap-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          14, 1,
+          16, 0
+        ]
       }
     });
 
@@ -508,13 +543,48 @@ document.addEventListener('DOMContentLoaded', function() {
           100, '#ff8a80'
         ],
         'circle-opacity': [
-          'interpolate',
-          ['linear'],
-          ['get', 'employment_intensity'],
-          0, 0.3,
-          100, 0.7
+          'interpolate', ['linear'], ['zoom'],
+          14, 0,  
+          15, 0.7 
         ],
         'circle-blur': 0.5
+      }
+    });
+
+    map.addLayer({
+      id: 'employment-heatmap',
+      type: 'heatmap',
+      source: 'employment_500',
+      paint: {
+        'heatmap-weight': [
+          'interpolate', ['linear'], ['get', 'employment_intensity'],
+          0, 0,
+          100, 1
+        ],
+        'heatmap-intensity': [
+          'interpolate', ['linear'], ['zoom'],
+          11, 1,
+          15, 3
+        ],
+        'heatmap-color': [
+          'interpolate', ['linear'], ['heatmap-density'],
+          0, 'rgba(0, 0, 0, 0)',
+          0.2, '#00429d',
+          0.4, '#4771b2',
+          0.6, '#73a2c6',
+          0.8, '#a5d5d8',
+          1, '#00f2ff' 
+        ],
+        'heatmap-radius': [
+          'interpolate', ['linear'], ['zoom'],
+          11, 15,
+          15, 40
+        ],
+        'heatmap-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          14, 1,
+          16, 0
+        ]
       }
     });
 
@@ -546,13 +616,48 @@ document.addEventListener('DOMContentLoaded', function() {
           100, '#6ec6ff'
         ],
         'circle-opacity': [
-          'interpolate',
-          ['linear'],
-          ['get', 'amenity_hbnw_intensity'],
-          0, 0.3,
-          100, 0.7
+          'interpolate', ['linear'], ['zoom'],
+          14, 0,  
+          15, 0.7 
         ],
         'circle-blur': 0.5
+      }
+    });
+
+    map.addLayer({
+      id: 'hbnw-amenity-heatmap',
+      type: 'heatmap',
+      source: 'amenity_500',
+      paint: {
+        'heatmap-weight': [
+          'interpolate', ['linear'], ['get', 'amenity_hbnwintensity'],
+          0, 0,
+          100, 1
+        ],
+        'heatmap-intensity': [
+          'interpolate', ['linear'], ['zoom'],
+          11, 1,
+          15, 3
+        ],
+        'heatmap-color': [
+          'interpolate', ['linear'], ['heatmap-density'],
+          0, 'rgba(0, 0, 0, 0)',
+          0.2, '#00429d',
+          0.4, '#4771b2',
+          0.6, '#73a2c6',
+          0.8, '#a5d5d8',
+          1, '#00f2ff' 
+        ],
+        'heatmap-radius': [
+          'interpolate', ['linear'], ['zoom'],
+          11, 15,
+          15, 40
+        ],
+        'heatmap-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          14, 1,
+          16, 0
+        ]
       }
     });
 
@@ -578,13 +683,48 @@ document.addEventListener('DOMContentLoaded', function() {
           100, '#6ec6ff'
         ],
         'circle-opacity': [
-          'interpolate',
-          ['linear'],
-          ['get', 'amenity_nhb_intensity'],
-          0, 0.3,
-          100, 0.7
+          'interpolate', ['linear'], ['zoom'],
+          14, 0,  
+          15, 0.7 
         ],
         'circle-blur': 0.5
+      }
+    });
+
+    map.addLayer({
+      id: 'nhb-amenity-heatmap',
+      type: 'heatmap',
+      source: 'residential_500',
+      paint: {
+        'heatmap-weight': [
+          'interpolate', ['linear'], ['get', 'amenity_nhb_intensity'],
+          0, 0,
+          100, 1
+        ],
+        'heatmap-intensity': [
+          'interpolate', ['linear'], ['zoom'],
+          11, 1,
+          15, 3
+        ],
+        'heatmap-color': [
+          'interpolate', ['linear'], ['heatmap-density'],
+          0, 'rgba(0, 0, 0, 0)',
+          0.2, '#00429d',
+          0.4, '#4771b2',
+          0.6, '#73a2c6',
+          0.8, '#a5d5d8',
+          1, '#00f2ff' 
+        ],
+        'heatmap-radius': [
+          'interpolate', ['linear'], ['zoom'],
+          11, 15,
+          15, 40
+        ],
+        'heatmap-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          14, 1,
+          16, 0
+        ]
       }
     });
 
@@ -630,7 +770,8 @@ document.addEventListener('DOMContentLoaded', function() {
           2.723173461652838, '#7f1d1d',    // p95
           37.315249125300056, '#780ff1' // Max
         ],
-        'line-opacity': 0.95
+        'line-dasharray': [2, 2],
+        'line-opacity': 0.9
       }
     });
 
