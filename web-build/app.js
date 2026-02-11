@@ -481,6 +481,7 @@ document.addEventListener('DOMContentLoaded', function() {
       id: 'residential-heatmap',
       type: 'heatmap',
       source: 'residential_500',
+      'source-layer': 'default',
       paint: {
         'heatmap-weight': [
           'interpolate', ['linear'], ['get', 'residential_intensity'],
@@ -555,6 +556,7 @@ document.addEventListener('DOMContentLoaded', function() {
       id: 'employment-heatmap',
       type: 'heatmap',
       source: 'employment_500',
+      'source-layer': 'default',
       paint: {
         'heatmap-weight': [
           'interpolate', ['linear'], ['get', 'employment_intensity'],
@@ -628,6 +630,7 @@ document.addEventListener('DOMContentLoaded', function() {
       id: 'hbnw-amenity-heatmap',
       type: 'heatmap',
       source: 'amenity_500',
+      'source-layer': 'default',
       paint: {
         'heatmap-weight': [
           'interpolate', ['linear'], ['get', 'amenity_hbnwintensity'],
@@ -695,6 +698,7 @@ document.addEventListener('DOMContentLoaded', function() {
       id: 'nhb-amenity-heatmap',
       type: 'heatmap',
       source: 'residential_500',
+      'source-layer': 'default',
       paint: {
         'heatmap-weight': [
           'interpolate', ['linear'], ['get', 'amenity_nhb_intensity'],
