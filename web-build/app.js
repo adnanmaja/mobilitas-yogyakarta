@@ -443,8 +443,8 @@ document.addEventListener('DOMContentLoaded', function() {
   map.on('load', () => {
     // Residemtials
     map.addSource('residential_500', {
-      type: 'geojson',
-      data: 'pmtiles://./residential_500m.geojson'
+      type: 'vector',
+      data: 'pmtiles://./residential_500m.pmtiles'
     });
 
     map.addLayer({
@@ -481,8 +481,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Employments
     map.addSource('employment_500', {
-      type: 'geojson',
-      data: 'pmtiles://./employment_500m.geojson'
+      type: 'vector',
+      data: 'pmtiles://./employment_500m.pmtiles'
     });
 
     map.addLayer({
@@ -518,8 +518,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Amenities
     map.addSource('amenity_500', {
-      type: 'geojson',
-      data: 'pmtiles://./services_amenities_500m.geojson'
+      type: 'vector',
+      data: 'pmtiles://./services_amenities_500m.pmtiles'
     });
 
     map.addLayer({
@@ -588,15 +588,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // EDGE FLOWS
     map.addSource('peak-flow-data', {
-      type: 'geojson',
-      data: 'pmtiles://./rea_1000m_edge_flows_v3.geojson'
+      type: 'vector',
+      data: 'pmtiles://./rea_1000m_edge_flows_v3.pmtiles'
     });
     map.addSource('off-peak-flow-data', {
-      type: 'geojson',
+      type: 'vector',
       data: 'n/a'
     });
     map.addSource('weekend-flow-data', {
-      type: 'geojson',
+      type: 'vector',
       data: 'n/a'
     });
 
@@ -613,19 +613,19 @@ document.addEventListener('DOMContentLoaded', function() {
           'interpolate',
           ['linear'],
           ['get', 'total_flow'],
-          0.02991140605115561, 1.2,    // Median: Thin line
-          0.485739124256793, 4,      // 90th Percentile: Medium line
-          18.60673009247148, 12      // Maximum: Very thick line
+          0.07966477843001485, 1.2,    // Median: Thin line
+          1.399054811172391, 4,      // 90th Percentile: Medium line
+          37.315249125300056, 12      // Maximum: Very thick line
         ],
         'line-color': [
           'interpolate',
           ['linear'],
           ['get', 'total_flow'],
-          0.02991140605115561, '#34d399', // Median: Green
-          0.1894417383427027, '#fbbf24',   // 80th: Amber
-          0.485739124256793, '#ef4444',   // 90th Percentile: Red
-          1.03688762983506426, '#7f1d1d',    // 95th: Deep Red
-          18.60673009247148, '#780ff1' // Max: Purple
+          0.07966477843001485, '#34d399', // Median: Green
+          0.6013697411714708, '#fbbf24',   // 80th: Amber
+          1.399054811172391, '#ef4444',   // 90th Percentile: Red
+          2.723173461652838, '#7f1d1d',    // 95th: Deep Red
+          37.315249125300056, '#780ff1' // Max: Purple
         ],
         'line-opacity': 0.95
       }
@@ -690,14 +690,14 @@ document.addEventListener('DOMContentLoaded', function() {
     // CONGESTIONS
     map.addSource('peak-congestion-data', {
       type: 'geojson',
-      data: 'pmtiles://.rea_1000m_congestions_v4.geojson'
+      data: 'pmtiles://.rea_1000m_congestions_v4.pmtiles'
     });
     map.addSource('off-peak-congestion-data', {
       type: 'geojson',
       data: 'n/a'
     });
     map.addSource('weekend-congestion-data', {
-      type: 'geojson',
+      type: 'vector',
       data: 'n/a'
     });
 
