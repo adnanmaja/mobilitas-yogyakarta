@@ -115,8 +115,8 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     // Update dropdown panel options
-    if (dropdownPanel) {
-      dropdownPanel.querySelectorAll('.dropdown-panel-option').forEach(option => {
+    if (timeDropdownPanel) {
+      timeDropdownPanel.querySelectorAll('.dropdown-panel-option').forEach(option => {
         if (option.dataset.period === period) {
           option.classList.add('active');
         } else {
@@ -126,7 +126,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     // Close dropdown panel
-    closeDropdownPanel();
+    closeTimeDropdownPanel();
   }
 
   // Function to update amenity type
@@ -838,17 +838,17 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // CONGESTIONS
     map.addSource('peak-congestion-data', {
-      type: 'geojson',
+      type: 'vector',
       data: 'pmtiles://.rea_1000m_congestions_v4.pmtiles'
     });
-    map.addSource('off-peak-congestion-data', {
-      type: 'geojson',
-      data: 'n/a'
-    });
-    map.addSource('weekend-congestion-data', {
-      type: 'vector',
-      data: 'n/a'
-    });
+    // map.addSource('off-peak-congestion-data', {
+    //   type: 'vector',
+    //   data: 'n/a'
+    // });
+    // map.addSource('weekend-congestion-data', {
+    //   type: 'vector',
+    //   data: 'n/a'
+    // });
 
     map.addLayer({
       'id': 'peak-congestion-layer',
