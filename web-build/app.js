@@ -1,3 +1,5 @@
+const { url } = require("inspector");
+
 document.addEventListener('DOMContentLoaded', function() {
 
   // Add PMTiles protocol
@@ -444,7 +446,8 @@ document.addEventListener('DOMContentLoaded', function() {
     // Residemtials
     map.addSource('residential_500', {
       type: 'vector',
-      data: 'pmtiles://./residential_500m.pmtiles'
+      url: 'pmtiles://./residential_500m.pmtiles',
+      attribution: ''
     });
 
     map.addLayer({
@@ -519,7 +522,8 @@ document.addEventListener('DOMContentLoaded', function() {
     // Employments
     map.addSource('employment_500', {
       type: 'vector',
-      data: 'pmtiles://./employment_500m.pmtiles'
+      url: 'pmtiles://./employment_500m.pmtiles',
+      attribution: ''
     });
 
     map.addLayer({
@@ -593,7 +597,8 @@ document.addEventListener('DOMContentLoaded', function() {
     // Amenities
     map.addSource('amenity_500', {
       type: 'vector',
-      data: 'pmtiles://./services_amenities_500m.pmtiles'
+      url: 'pmtiles://./services_amenities_500m.pmtiles',
+      attribution: ''
     });
 
     map.addLayer({
@@ -697,7 +702,7 @@ document.addEventListener('DOMContentLoaded', function() {
     map.addLayer({
       id: 'nhb-amenity-heatmap',
       type: 'heatmap',
-      source: 'residential_500',
+      source: 'amenity_500',
       'source-layer': 'default',
       paint: {
         'heatmap-weight': [
@@ -735,15 +740,18 @@ document.addEventListener('DOMContentLoaded', function() {
     // EDGE FLOWS
     map.addSource('peak-flow-data', {
       type: 'vector',
-      data: 'pmtiles://./rea_1000m_edge_flows_v3.pmtiles'
+      url: 'pmtiles://./rea_1000m_edge_flows_v3.pmtiles',
+      attribution: ''
     });
     map.addSource('off-peak-flow-data', {
       type: 'vector',
-      data: 'pmtiles://./rea_1000m_edge_flows_v3.pmtiles'
+      url: 'pmtiles://./rea_1000m_edge_flows_v3.pmtiles',
+      attribution: ''
     });
     map.addSource('weekend-flow-data', {
       type: 'vector',
-      data: 'pmtiles://./rea_1000m_edge_flows_v3.pmtiles'
+      url: 'pmtiles://./rea_1000m_edge_flows_v3.pmtiles',
+      attribution: ''
     });
 
     map.addLayer({
@@ -839,15 +847,18 @@ document.addEventListener('DOMContentLoaded', function() {
     // CONGESTIONS
     map.addSource('peak-congestion-data', {
       type: 'vector',
-      data: 'pmtiles://./rea_1000m_congestions_v4.pmtiles'
+      url: 'pmtiles://./rea_1000m_congestions_v4.pmtiles',
+      attribution: ''
     });
     map.addSource('off-peak-congestion-data', {
       type: 'vector',
-      data: 'pmtiles://./rea_1000m_congestions_v4.pmtiles'
+      url: 'pmtiles://./rea_1000m_congestions_v4.pmtiles',
+      attribution: ''
     });
     map.addSource('weekend-congestion-data', {
       type: 'vector',
-      data: 'pmtiles://./rea_1000m_congestions_v4.pmtiles'
+      url: 'pmtiles://./rea_1000m_congestions_v4.pmtiles',
+      attribution: ''
     });
 
     map.addLayer({
