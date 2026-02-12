@@ -1,5 +1,3 @@
-const { url } = require("inspector");
-
 document.addEventListener('DOMContentLoaded', function() {
 
   // Add PMTiles protocol
