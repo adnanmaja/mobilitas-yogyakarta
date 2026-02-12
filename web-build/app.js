@@ -633,7 +633,7 @@ document.addEventListener('DOMContentLoaded', function() {
       'source-layer': 'default',
       paint: {
         'heatmap-weight': [
-          'interpolate', ['linear'], ['get', 'amenity_hbnwintensity'],
+          'interpolate', ['linear'], ['get', 'amenity_hbnw_intensity'],
           0, 0,
           100, 1
         ],
@@ -739,11 +739,11 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     map.addSource('off-peak-flow-data', {
       type: 'vector',
-      data: 'n/a'
+      data: 'pmtiles://./rea_1000m_edge_flows_v3.pmtiles'
     });
     map.addSource('weekend-flow-data', {
       type: 'vector',
-      data: 'n/a'
+      data: 'pmtiles://./rea_1000m_edge_flows_v3.pmtiles'
     });
 
     map.addLayer({
@@ -839,16 +839,16 @@ document.addEventListener('DOMContentLoaded', function() {
     // CONGESTIONS
     map.addSource('peak-congestion-data', {
       type: 'vector',
-      data: 'pmtiles://.rea_1000m_congestions_v4.pmtiles'
+      data: 'pmtiles://./rea_1000m_congestions_v4.pmtiles'
     });
-    // map.addSource('off-peak-congestion-data', {
-    //   type: 'vector',
-    //   data: 'n/a'
-    // });
-    // map.addSource('weekend-congestion-data', {
-    //   type: 'vector',
-    //   data: 'n/a'
-    // });
+    map.addSource('off-peak-congestion-data', {
+      type: 'vector',
+      data: 'pmtiles://./rea_1000m_congestions_v4.pmtiles'
+    });
+    map.addSource('weekend-congestion-data', {
+      type: 'vector',
+      data: 'pmtiles://./rea_1000m_congestions_v4.pmtiles'
+    });
 
     map.addLayer({
       'id': 'peak-congestion-layer',
