@@ -441,15 +441,16 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // Initialize map
   map.on('load', () => {
+
     // Residemtials
     map.addSource('residential_500', {
       type: 'vector',
-      url: 'pmtiles://./residential_500m.pmtiles',
+      url: 'pmtiles://./data/residential_500m.pmtiles',
       attribution: ''
     });
 
     map.addLayer({
-      id: 'residential-layer-500m',
+      id: 'residential-layer-500m', // circles
       type: 'circle',
       source: 'residential_500',
       'source-layer': 'default',
@@ -479,7 +480,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     map.addLayer({
-      id: 'residential-heatmap',
+      id: 'residential-heatmap',  // heatmap
       type: 'heatmap',
       source: 'residential_500',
       'source-layer': 'default',
@@ -520,7 +521,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Employments
     map.addSource('employment_500', {
       type: 'vector',
-      url: 'pmtiles://./employment_500m.pmtiles',
+      url: 'pmtiles://./data/employment_500m.pmtiles',
       attribution: ''
     });
 
@@ -595,7 +596,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Amenities
     map.addSource('amenity_500', {
       type: 'vector',
-      url: 'pmtiles://./services_amenities_500m.pmtiles',
+      url: 'pmtiles://./data/services_amenities_500m.pmtiles',
       attribution: ''
     });
 
@@ -738,17 +739,17 @@ document.addEventListener('DOMContentLoaded', function() {
     // EDGE FLOWS
     map.addSource('peak-flow-data', {
       type: 'vector',
-      url: 'pmtiles://./rea_1000m_edge_flows_v3.pmtiles',
+      url: 'pmtiles://./data/rea_1000m_edge_flows_v3.pmtiles',
       attribution: ''
     });
     map.addSource('off-peak-flow-data', {
       type: 'vector',
-      url: 'pmtiles://./rea_1000m_edge_flows_v3.pmtiles',
+      url: 'pmtiles://./data/rea_1000m_edge_flows_v3.pmtiles',
       attribution: ''
     });
     map.addSource('weekend-flow-data', {
       type: 'vector',
-      url: 'pmtiles://./rea_1000m_edge_flows_v3.pmtiles',
+      url: 'pmtiles://./data/rea_1000m_edge_flows_v3.pmtiles',
       attribution: ''
     });
 
@@ -818,6 +819,7 @@ document.addEventListener('DOMContentLoaded', function() {
       'id': 'weekend-flow-layer',
       'type': 'line',
       'source': 'weekend-flow-data',
+      'source-layer': 'default',
       'layout': {
         'line-join': 'round',
         'line-cap': 'round'
@@ -845,17 +847,17 @@ document.addEventListener('DOMContentLoaded', function() {
     // CONGESTIONS
     map.addSource('peak-congestion-data', {
       type: 'vector',
-      url: 'pmtiles://./rea_1000m_congestions_v4.pmtiles',
+      url: 'pmtiles://./data/rea_1000m_congestions_v4.pmtiles',
       attribution: ''
     });
     map.addSource('off-peak-congestion-data', {
       type: 'vector',
-      url: 'pmtiles://./rea_1000m_congestions_v4.pmtiles',
+      url: 'pmtiles://./data/rea_1000m_congestions_v4.pmtiles',
       attribution: ''
     });
     map.addSource('weekend-congestion-data', {
       type: 'vector',
-      url: 'pmtiles://./rea_1000m_congestions_v4.pmtiles',
+      url: 'pmtiles://./data/rea_1000m_congestions_v4.pmtiles',
       attribution: ''
     });
 
