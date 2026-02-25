@@ -28,9 +28,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // All layer groups
   const layerGroups = {
-    residential: ['residential-layer-500m'],
-    employment: ['employment-layer-500m'],
-    amenity: ['hbnw-amenity-layer-500m', 'nhb-amenity-layer-500m'],
+    residential: ['residential-layer-500m', 'residential-heatmap'],
+    employment: ['employment-layer-500m', 'emplyment-heatmap'],
+    amenity: ['hbnw-amenity-layer-500m', 'hbnw-amenity-heatmap', 'nhb-amenity-layer-500m', 'nhb-amenity-heatmap'],
     flows: ['peak-flow-layer', 'off-peak-flow-layer', 'weekend-flow-layer'],
     congestion: ['peak-congestion-layer', 'off-peak-congestion-layer', 'weekend-congestion-layer']
   };
@@ -52,8 +52,8 @@ document.addEventListener('DOMContentLoaded', function() {
   };
 
   const typeToLayerMap = {
-  'amenity-hbnw': 'hbnw-amenity-layer-500m',
-  'amenity-nhb': 'nhb-amenity-layer-500m',
+  'amenity-hbnw': ['hbnw-amenity-layer-500m', 'hbnw-amenity-heatmap'],
+  'amenity-nhb': ['nhb-amenity-layer-500m', 'nhb-amenity-heatmap'],
 };
 
   // Function to hide all layers except base map
@@ -83,10 +83,12 @@ document.addEventListener('DOMContentLoaded', function() {
     } 
     // Handle amenity (type-based)
     else if (layerType === 'amenity') {
-      const activeLayerId = typeToLayerMap[currentAmenityType];
-      if (map.getLayer(activeLayerId)) {
-        map.setLayoutProperty(activeLayerId, 'visibility', 'visible');
-      }
+      const activeLayers = typeToLayerMap[currentAmenityType];
+      activeLayers.forEach(layerId => {
+        if(map.getLayer(layerId)){
+          map.setLayoutProperty(layerId, 'visibility', 'visible')
+        }
+      });
     }
     // Handle residential and employment (show all layers in group)
     else {
@@ -152,7 +154,7 @@ document.addEventListener('DOMContentLoaded', function() {
       });
     }
 
-    closeDropdownPanel();
+    closeTypeDropdownPanel();
 
   }
 
