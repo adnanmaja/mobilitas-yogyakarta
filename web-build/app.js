@@ -181,6 +181,9 @@ document.addEventListener('DOMContentLoaded', function() {
       typeControl.style.display = 'block';
       timeControl.style.display = 'none';
       closeAllDropdownPanels();
+    } else if (selectedLayer === 'none'){
+      timeControl.style.display = 'none';
+      typeControl.style.display = 'none';
     } else {
       timeControl.style.display = 'none';
       typeControl.style.display = 'none';
