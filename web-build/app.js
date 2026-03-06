@@ -29,7 +29,7 @@ document.addEventListener('DOMContentLoaded', function() {
   // All layer groups
   const layerGroups = {
     residential: ['residential-layer-500m', 'residential-heatmap'],
-    employment: ['employment-layer-500m', 'emplyment-heatmap'],
+    employment: ['employment-layer-500m', 'employment-heatmap'],
     amenity: ['hbnw-amenity-layer-500m', 'hbnw-amenity-heatmap', 'nhb-amenity-layer-500m', 'nhb-amenity-heatmap'],
     flows: ['peak-flow-layer', 'off-peak-flow-layer', 'weekend-flow-layer'],
     congestion: ['peak-congestion-layer', 'off-peak-congestion-layer', 'weekend-congestion-layer']
