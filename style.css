@@ -225,6 +225,25 @@ button:hover {
   margin-top: 3px;
 }
 
+/* Amenity type Selector Dropdown */
+.dropdown-selector {
+  padding: 8px;
+  border-top: 1px solid #2a2d2eff;
+}
+
+.dropdown-title {
+  font-size: 15px;
+  color: #e8eaed;
+  margin-bottom: 4px;
+  font-weight: 400;
+}
+
+.type-dropdown {
+  position: relative;
+  width: 90%;
+  padding-left: 11px;
+}
+
 /* Time Selector Dropdown */
 .time-selector {
   padding: 8px;

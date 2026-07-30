@@ -74,18 +74,26 @@
           <div class="layer-check"></div>
         </div>
 
-        <div class="layer-option active" data-layer="origins">
+        <div class="layer-option active" data-layer="residential">
           <div class="layer-content-wrapper">
-            <span class="layer-label">Origins</span>
-            <span class="layer-desc">Show origin zone circles.</span>
+            <span class="layer-label">Residential</span>
+            <span class="layer-desc">Show where people lives.</span>
           </div>
           <div class="layer-check"></div>
         </div>
 
-        <div class="layer-option active" data-layer="destinations">
+        <div class="layer-option active" data-layer="employment">
           <div class="layer-content-wrapper">
-            <span class="layer-label">Destinations</span>
-            <span class="layer-desc">Show destination zone circles.</span>
+            <span class="layer-label">Employment</span>
+            <span class="layer-desc">Show concentration of workplaces</span>
+          </div>
+          <div class="layer-check"></div>
+        </div>
+
+        <div class="layer-option active" data-layer="amenity">
+          <div class="layer-content-wrapper">
+            <span class="layer-label">Amenities</span>
+            <span class="layer-desc">Show the distribution of amenities and services</span>
           </div>
           <div class="layer-check"></div>
         </div>
@@ -106,16 +114,29 @@
           <div class="layer-check"></div>
         </div>
       </div>
-      
-      <!-- Time Period Selector (shown only for flows & congestion) -->
-      <div class="time-selector" id="time-control" style="display: none;">
-        <div class="time-dropdown ">
+
+      <!-- Time Control Dropdown -->
+      <div class="dropdown-selector" id="time-control" style="display: none;">
+        <div class="time-dropdown">
           <div class="dropdown-header">
             <div class="dropdown-left">
-              <div class="time-title">Time Period</div>
-              <div class="dropdown-selected">Peak</div>
+              <div class="dropdown-title">Time Period</div>
+              <span class="dropdown-selected">Peak</span>
             </div>
-            <div class="dropdown-arrow">▼</div>
+            <span class="dropdown-icon">▼</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Type Control Dropdown -->
+      <div class="dropdown-selector" id="type-control" style="display: none;">
+        <div class="type-dropdown">
+          <div class="dropdown-header">
+            <div class="dropdown-left">
+              <div class="dropdown-title">Amenity types</div>
+              <span class="dropdown-selected">HBNW Amenities</span>
+            </div>
+            <span class="dropdown-icon">▼</span>
           </div>
         </div>
       </div>

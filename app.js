@@ -1,6 +1,6 @@
 document.addEventListener('DOMContentLoaded', function() {
 
-    // Add PMTiles protocol
+  // Add PMTiles protocol
     let protocol = new pmtiles.Protocol();
     maplibregl.addProtocol("pmtiles", protocol.tile);
 
@@ -15,19 +15,22 @@ document.addEventListener('DOMContentLoaded', function() {
         bearing: 0
     });
 
-
+  // Disable rotation for flat feel
   map.dragRotate.disable();
   map.touchZoomRotate.disableRotation();
 
   // Current state
   let currentLayerType = 'none';
   let currentTimePeriod = 'peak';
-  let dropdownPanel = null;
+  let currentAmenityType = 'amenity-hbnw'
+  let timeDropdownPanel = null;
+  let typeDropdownPanel = null;
 
   // All layer groups
   const layerGroups = {
-    origins: ['origins-layer-1km', 'origins-layer-300m'],
-    destinations: ['destinations-layer-1km', 'destinations-layer-300m'],
+    residential: ['residential-layer-500m', 'residential-heatmap'],
+    employment: ['employment-layer-500m', 'employment-heatmap'],
+    amenity: ['hbnw-amenity-layer-500m', 'hbnw-amenity-heatmap', 'nhb-amenity-layer-500m', 'nhb-amenity-heatmap'],
     flows: ['peak-flow-layer', 'off-peak-flow-layer', 'weekend-flow-layer'],
     congestion: ['peak-congestion-layer', 'off-peak-congestion-layer', 'weekend-congestion-layer']
   };
@@ -48,6 +51,11 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   };
 
+  const typeToLayerMap = {
+  'amenity-hbnw': ['hbnw-amenity-layer-500m', 'hbnw-amenity-heatmap'],
+  'amenity-nhb': ['nhb-amenity-layer-500m', 'nhb-amenity-heatmap'],
+};
+
   // Function to hide all layers except base map
   function hideAllLayers() {
     Object.values(layerGroups).flat().forEach(layerId => {
@@ -65,20 +73,33 @@ document.addEventListener('DOMContentLoaded', function() {
     if (layerType === 'none') {
       return;
     }
-    
+
+    // Handle flows and congestion (time-based)
     if (layerType === 'flows' || layerType === 'congestion') {
       const activeLayerId = timeToLayerMap[currentTimePeriod][layerType];
       if (map.getLayer(activeLayerId)) {
         map.setLayoutProperty(activeLayerId, 'visibility', 'visible');
       }
-    } else {
-      const layersToShow = layerGroups[layerType];
-      layersToShow.forEach(layerId => {
-        if (map.getLayer(layerId)) {
-          map.setLayoutProperty(layerId, 'visibility', 'visible');
+    } 
+    // Handle amenity (type-based)
+    else if (layerType === 'amenity') {
+      const activeLayers = typeToLayerMap[currentAmenityType];
+      activeLayers.forEach(layerId => {
+        if(map.getLayer(layerId)){
+          map.setLayoutProperty(layerId, 'visibility', 'visible')
         }
       });
     }
+    // Handle residential and employment (show all layers in group)
+    else {
+    const layersToShow = layerGroups[layerType];
+    layersToShow.forEach(layerId => {
+      if (map.getLayer(layerId)) {
+        map.setLayoutProperty(layerId, 'visibility', 'visible');
+      }
+    });
+  }
+
   }
 
   // Function to update time period
@@ -96,8 +117,8 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     // Update dropdown panel options
-    if (dropdownPanel) {
-      dropdownPanel.querySelectorAll('.dropdown-panel-option').forEach(option => {
+    if (timeDropdownPanel) {
+      timeDropdownPanel.querySelectorAll('.dropdown-panel-option').forEach(option => {
         if (option.dataset.period === period) {
           option.classList.add('active');
         } else {
@@ -107,7 +128,34 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     // Close dropdown panel
-    closeDropdownPanel();
+    closeTimeDropdownPanel();
+  }
+
+  // Function to update amenity type
+  function updateAmenityTypes(type) {
+    currentAmenityType = type
+
+    if (currentLayerType === 'amenity') {
+      showLayerType(currentLayerType);
+    }
+
+    const selectedText = document.querySelector('.dropdown-selected');
+    if (selectedText) {
+      selectedText.textContent = type.charAt(0).toUpperCase() + type.slice(1);
+    }
+
+    if (dropdownPanel) {
+      dropdownPanel.querySelectorAll('.dropdown-panel-option').forEach(option => {
+        if (option.dataset.type === type) {
+          option.classList.add('active');
+        } else {
+          option.classList.remove('active');
+        }
+      });
+    }
+
+    closeTypeDropdownPanel();
+
   }
 
   // Function to update layer selection UI
@@ -123,31 +171,40 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     
     const timeControl = document.getElementById('time-control');
+    const typeControl = document.getElementById('type-control');
+    
     if (selectedLayer === 'flows' || selectedLayer === 'congestion') {
       timeControl.style.display = 'block';
+      typeControl.style.display = 'none';
+      closeAllDropdownPanels();
+    } else if (selectedLayer === 'amenity') {
+      typeControl.style.display = 'block';
+      timeControl.style.display = 'none';
+      closeAllDropdownPanels();
+    } else if (selectedLayer === 'none'){
+      timeControl.style.display = 'none';
+      typeControl.style.display = 'none';
     } else {
       timeControl.style.display = 'none';
-      closeDropdownPanel();
+      typeControl.style.display = 'none';
+      closeAllDropdownPanels();
     }
   }
 
-  // Function to create floating dropdown panel
-  function createDropdownPanel() {
-    // Remove existing panel if any
-    if (dropdownPanel) {
-      dropdownPanel.remove();
+  // Function to create floating dropdown panel for time periods
+  function createTimeDropdownPanel() {
+    if (timeDropdownPanel) {
+      timeDropdownPanel.remove();
     }
     
-    // Create new panel
-    dropdownPanel = document.createElement('div');
-    dropdownPanel.className = 'dropdown-panel';
-    dropdownPanel.id = 'time-dropdown-panel';
+    timeDropdownPanel = document.createElement('div');
+    timeDropdownPanel.className = 'dropdown-panel time-dropdown-panel';
+    timeDropdownPanel.id = 'time-dropdown-panel';
     
-    // Add options
     const periods = [
       { id: 'peak', label: 'Peak' },
-      { id: 'off-peak', label: 'Off-Peak' },
-      { id: 'weekend', label: 'Weekend' }
+      { id: 'off-peak', label: 'Off-Peak (unavailable)' },
+      { id: 'weekend', label: 'Weekend (unavailable)' }
     ];
     
     periods.forEach(period => {
@@ -163,61 +220,141 @@ document.addEventListener('DOMContentLoaded', function() {
         updateTimePeriod(period.id);
       });
       
-      dropdownPanel.appendChild(option);
+      timeDropdownPanel.appendChild(option);
     });
     
-    document.body.appendChild(dropdownPanel);
+    document.body.appendChild(timeDropdownPanel);
+  }
+
+  // Function to create floating dropdown panel for amenity type
+  function createTypeDropdownPanel() {
+    if (typeDropdownPanel) {
+      typeDropdownPanel.remove();
+    }
+    
+    typeDropdownPanel = document.createElement('div');
+    typeDropdownPanel.className = 'dropdown-panel type-dropdown-panel';
+    typeDropdownPanel.id = 'type-dropdown-panel';
+    
+    const types = [
+      { id: 'amenity-hbnw', label: 'HBNW Amenities' },
+      { id: 'amenity-nhb', label: 'NHB Amenities' },
+    ];
+    
+    types.forEach(type => {
+      const option = document.createElement('div');
+      option.className = 'dropdown-panel-option';
+      if (type.id === currentAmenityType) {
+        option.classList.add('active');
+      }
+      option.dataset.type = type.id;
+      option.textContent = type.label;
+      
+      option.addEventListener('click', () => {
+        updateAmenityTypes(type.id);
+      });
+      
+      typeDropdownPanel.appendChild(option);
+    });
+    
+    document.body.appendChild(typeDropdownPanel);
   }
 
   // Function to position dropdown panel
-  function positionDropdownPanel() {
-    if (!dropdownPanel) return;
+  function positionTimeDropdownPanel() {
+    if (!timeDropdownPanel) return;
     
-    const dropdownHeader = document.querySelector('.dropdown-header');
-    const headerRect = dropdownHeader.getBoundingClientRect();
+    const timeDropdownHeader = document.querySelector('#time-control .dropdown-header');
+    const headerRect = timeDropdownHeader.getBoundingClientRect();
     
-    // Position panel below the dropdown header
-    dropdownPanel.style.left = `${headerRect.left}px`;
-    dropdownPanel.style.top = `${headerRect.bottom + 5}px`;
+    timeDropdownPanel.style.left = `${headerRect.left}px`;
+    timeDropdownPanel.style.top = `${headerRect.bottom + 5}px`;
   }
 
-  // Function to open dropdown panel
-  function openDropdownPanel() {
-    const dropdownHeader = document.querySelector('.dropdown-header');
+  function positionTypeDropdownPanel() {
+    if (!typeDropdownPanel) return;
     
-    if (!dropdownPanel) {
-      createDropdownPanel();
+    const typeDropdownHeader = document.querySelector('#type-control .dropdown-header');
+    const headerRect = typeDropdownHeader.getBoundingClientRect();
+    
+    typeDropdownPanel.style.left = `${headerRect.left}px`;
+    typeDropdownPanel.style.top = `${headerRect.bottom + 5}px`;
+  }
+
+  // Separate open/close functions
+  function openTimeDropdownPanel() {
+    const timeDropdownHeader = document.querySelector('#time-control .dropdown-header');
+    
+    if (!timeDropdownPanel) {
+      createTimeDropdownPanel();
     }
     
-    dropdownPanel.classList.add('active');
-    dropdownHeader.classList.add('active');
-    positionDropdownPanel();
+    timeDropdownPanel.classList.add('active');
+    timeDropdownHeader.classList.add('active');
+    positionTimeDropdownPanel();
     
-    // Close panel when clicking outside
-    document.addEventListener('click', closeDropdownOnClickOutside);
+    document.addEventListener('click', closeTimeDropdownOnClickOutside);
   }
 
-  // Function to close dropdown panel
-  function closeDropdownPanel() {
-    const dropdownHeader = document.querySelector('.dropdown-header');
+  function openTypeDropdownPanel() {
+    const typeDropdownHeader = document.querySelector('#type-control .dropdown-header');
     
-    if (dropdownPanel) {
-      dropdownPanel.classList.remove('active');
+    if (!typeDropdownPanel) {
+      createTypeDropdownPanel();
     }
     
-    dropdownHeader.classList.remove('active');
-    document.removeEventListener('click', closeDropdownOnClickOutside);
+    typeDropdownPanel.classList.add('active');
+    typeDropdownHeader.classList.add('active');
+    positionTypeDropdownPanel();
+    
+    document.addEventListener('click', closeTypeDropdownOnClickOutside);
   }
 
-  // Function to handle clicks outside dropdown
-  function closeDropdownOnClickOutside(event) {
-    const dropdownHeader = document.querySelector('.dropdown-header');
-    const timeControl = document.getElementById('time-control');
+  function closeTimeDropdownPanel() {
+    const timeDropdownHeader = document.querySelector('#time-control .dropdown-header');
     
-    if (dropdownPanel && !dropdownPanel.contains(event.target) && 
-        !dropdownHeader.contains(event.target) &&
-        timeControl.style.display !== 'none') {
-      closeDropdownPanel();
+    if (timeDropdownPanel) {
+      timeDropdownPanel.classList.remove('active');
+    }
+    
+    timeDropdownHeader.classList.remove('active');
+    document.removeEventListener('click', closeTimeDropdownOnClickOutside);
+  }
+
+  function closeTypeDropdownPanel() {
+    const typeDropdownHeader = document.querySelector('#type-control .dropdown-header');
+    
+    if (typeDropdownPanel) {
+      typeDropdownPanel.classList.remove('active');
+    }
+    
+    typeDropdownHeader.classList.remove('active');
+    document.removeEventListener('click', closeTypeDropdownOnClickOutside);
+  }
+
+  function closeAllDropdownPanels() {
+    closeTimeDropdownPanel();
+    closeTypeDropdownPanel();
+  }
+
+  // Separate click outside handlers
+  function closeTimeDropdownOnClickOutside(event) {
+    const timeDropdownHeader = document.querySelector('#time-control .dropdown-header');
+    
+    if (timeDropdownPanel && 
+        !timeDropdownPanel.contains(event.target) && 
+        !timeDropdownHeader.contains(event.target)) {
+      closeTimeDropdownPanel();
+    }
+  }
+
+  function closeTypeDropdownOnClickOutside(event) {
+    const typeDropdownHeader = document.querySelector('#type-control .dropdown-header');
+    
+    if (typeDropdownPanel && 
+        !typeDropdownPanel.contains(event.target) && 
+        !typeDropdownHeader.contains(event.target)) {
+      closeTypeDropdownPanel();
     }
   }
 
@@ -229,7 +366,8 @@ document.addEventListener('DOMContentLoaded', function() {
     toggleBtn.addEventListener('click', () => {
       panel.classList.toggle('panel-is-closed');
       // Close dropdown when panel is toggled
-      closeDropdownPanel();
+      closeTimeDropdownPanel();
+      closeTypeDropdownPanel();
     });
   }
 
@@ -249,7 +387,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     if (learnMoreBtn) {
       learnMoreBtn.addEventListener('click', () => {
-        window.location.href = 'https://github.com/adnanmaja/mobilitas-yogyakarta';
+        alert('This visualization shows mobility patterns in Yogyakarta, Indonesia. It displays origins, employment, traffic flows, and congestion levels at different times of day.');
       });
     }
   }
@@ -266,16 +404,31 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // Time dropdown click handler
-    const dropdownHeader = document.querySelector('.dropdown-header');
-    if (dropdownHeader) {
-      dropdownHeader.addEventListener('click', (e) => {
+    const timeDropdownHeader = document.querySelector('#time-control .dropdown-header');
+    if (timeDropdownHeader) {
+      timeDropdownHeader.addEventListener('click', (e) => {
         e.stopPropagation();
-        const isActive = dropdownHeader.classList.contains('active');
+        const isActive = timeDropdownHeader.classList.contains('active');
         
         if (isActive) {
-          closeDropdownPanel();
+          closeTimeDropdownPanel();
         } else {
-          openDropdownPanel();
+          openTimeDropdownPanel();
+        }
+      });
+    }
+
+    // Type dropdown click handler
+    const typeDropdownHeader = document.querySelector('#type-control .dropdown-header');
+    if (typeDropdownHeader) {
+      typeDropdownHeader.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isActive = typeDropdownHeader.classList.contains('active');
+        
+        if (isActive) {
+          closeTypeDropdownPanel();
+        } else {
+          openTypeDropdownPanel();
         }
       });
     }
@@ -283,178 +436,326 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // Handle window resize
   window.addEventListener('resize', () => {
-    if (dropdownPanel && dropdownPanel.classList.contains('active')) {
-      positionDropdownPanel();
+    if (timeDropdownPanel && timeDropdownPanel.classList.contains('active')) {
+      positionTimeDropdownPanel();
+    }
+    if (typeDropdownPanel && typeDropdownPanel.classList.contains('active')) {
+      positionTypeDropdownPanel();
     }
   });
 
   // Initialize map
   map.on('load', () => {
-    // ORIGINS
-    map.addSource('origins_1000', {
-        type: 'vector',
-        url: 'pmtiles://./data/origin_v2_1_1000m.pmtiles',
-        attribution: ''
-    });
-    map.addSource('origins_300', {
-        type: 'vector',
-        url: 'pmtiles://./data/origin_v2_1_300m.pmtiles',
-        attribution: ''
+
+    // Residemtials
+    map.addSource('residential_500', {
+      type: 'vector',
+      url: 'pmtiles://./data/residential_500m.pmtiles',
+      attribution: ''
     });
 
     map.addLayer({
-      id: 'origins-layer-300m',
+      id: 'residential-layer-500m', // circles
       type: 'circle',
-      source: 'origins_300',
-      'source-layer': 'dest_300',
-      minzoom: 14,
+      source: 'residential_500',
+      'source-layer': 'default',
       paint: {
         'circle-radius': [
           'interpolate',
           ['linear'],
-          ['get', 'origin_score'],
+          ['get', 'residential_intensity'],
           0, 0,
           100, 18
         ],
         'circle-color': [
           'interpolate',
           ['linear'],
-          ['get', 'origin_score'],
+          ['get', 'residential_intensity'],
           0, '#1a4d6d',
           50, '#4a9fd8',
           100, '#6ec6ff'
         ],
         'circle-opacity': [
-          'interpolate',
-          ['linear'],
-          ['get', 'origin_score'],
-          0, 0.3,
-          100, 0.7
+          'interpolate', ['linear'], ['zoom'],
+          14, 0,  
+          15, 0.7 
         ],
         'circle-blur': 0.5
       }
     });
 
     map.addLayer({
-      id: 'origins-layer-1km',
-      type: 'circle',
-      source: 'origins_1000',
-      'source-layer': 'dest_300',
-      maxzoom: 14,
+      id: 'residential-heatmap',  // heatmap
+      type: 'heatmap',
+      source: 'residential_500',
+      'source-layer': 'default',
       paint: {
-        'circle-radius': [
-          'interpolate',
-          ['linear'],
-          ['get', 'origin_score'],
+        'heatmap-weight': [
+          'interpolate', ['linear'], ['get', 'residential_intensity'],
           0, 0,
-          100, 20
+          100, 1
         ],
-        'circle-color': [
-          'interpolate',
-          ['linear'],
-          ['get', 'origin_score'],
-          0, '#1a4d6d',
-          50, '#4a9fd8',
-          100, '#6ec6ff'
+        'heatmap-intensity': [
+          'interpolate', ['linear'], ['zoom'],
+          11, 1,
+          15, 3
         ],
-        'circle-opacity': 0.5,
-        'circle-blur': 0.3
+        'heatmap-color': [
+          'interpolate', ['linear'], ['heatmap-density'],
+          0, 'rgba(0, 0, 0, 0)',
+          0.2, '#00429d',
+          0.4, '#4771b2',
+          0.6, '#73a2c6',
+          0.8, '#a5d5d8',
+          1, '#00f2ff' 
+        ],
+        'heatmap-radius': [
+          'interpolate', ['linear'], ['zoom'],
+          11, 15,
+          15, 40
+        ],
+        'heatmap-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          14, 1,
+          16, 0
+        ]
       }
     });
 
-    // DESTINATIONS
-    map.addSource('destinations_1000', {
-        type: 'vector',
-        url: 'pmtiles://./data/destination_v3_1000m.pmtiles',
-        attribution: ''
-    });
-    map.addSource('destinations_300', {
-        type: 'vector',
-        url: 'pmtiles://./data/destination_v3_300m.pmtiles',
-        attribution: ''
+
+    // Employments
+    map.addSource('employment_500', {
+      type: 'vector',
+      url: 'pmtiles://./data/employment_500m.pmtiles',
+      attribution: ''
     });
 
     map.addLayer({
-      id: 'destinations-layer-300m',
+      id: 'employment-layer-500m',
       type: 'circle',
-      source: 'destinations_300',
-      'source-layer': 'dest_300',
-      minzoom: 14,
+      source: 'employment_500',
+      'source-layer': 'default',
       paint: {
         'circle-radius': [
           'interpolate',
           ['linear'],
-          ['get', 'destination_score'],
+          ['get', 'employment_intensity'],
           0, 0,
           100, 28
         ],
         'circle-color': [
           'interpolate',
           ['linear'],
-          ['get', 'destination_score'],
+          ['get', 'employment_intensity'],
           0, '#8b3a3a',
           50, '#d66b66',
           100, '#ff8a80'
         ],
         'circle-opacity': [
-          'interpolate',
-          ['linear'],
-          ['get', 'destination_score'],
-          0, 0.3,
-          100, 0.7
+          'interpolate', ['linear'], ['zoom'],
+          14, 0,  
+          15, 0.7 
         ],
         'circle-blur': 0.5
       }
     });
 
     map.addLayer({
-      id: 'destinations-layer-1km',
+      id: 'employment-heatmap',
+      type: 'heatmap',
+      source: 'employment_500',
+      'source-layer': 'default',
+      paint: {
+        'heatmap-weight': [
+          'interpolate', ['linear'], ['get', 'employment_intensity'],
+          0, 0,
+          100, 1
+        ],
+        'heatmap-intensity': [
+          'interpolate', ['linear'], ['zoom'],
+          11, 1,
+          15, 3
+        ],
+        'heatmap-color': [
+          'interpolate', ['linear'], ['heatmap-density'],
+          0, 'rgba(0, 0, 0, 0)',
+          0.2, '#00429d',
+          0.4, '#4771b2',
+          0.6, '#73a2c6',
+          0.8, '#a5d5d8',
+          1, '#00f2ff' 
+        ],
+        'heatmap-radius': [
+          'interpolate', ['linear'], ['zoom'],
+          11, 15,
+          15, 40
+        ],
+        'heatmap-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          14, 1,
+          16, 0
+        ]
+      }
+    });
+
+    // Amenities
+    map.addSource('amenity_500', {
+      type: 'vector',
+      url: 'pmtiles://./data/services_amenities_500m.pmtiles',
+      attribution: ''
+    });
+
+    map.addLayer({
+      id: 'hbnw-amenity-layer-500m',
       type: 'circle',
-      source: 'destinations_1000',
-      'source-layer': 'dest_300',
-      maxzoom: 14,
+      source: 'amenity_500',
+      'source-layer': 'default',
       paint: {
         'circle-radius': [
           'interpolate',
           ['linear'],
-          ['get', 'destination_score'],
+          ['get', 'amenity_hbnw_intensity'],
           0, 0,
-          100, 28
+          100, 18
         ],
         'circle-color': [
           'interpolate',
           ['linear'],
-          ['get', 'destination_score'],
-          0, '#8b3a3a',
-          50, '#d66b66',
-          100, '#ff8a80'
+          ['get', 'amenity_hbnw_intensity'],
+          0, '#1a4d6d',
+          50, '#4a9fd8',
+          100, '#6ec6ff'
         ],
         'circle-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          14, 0,  
+          15, 0.7 
+        ],
+        'circle-blur': 0.5
+      }
+    });
+
+    map.addLayer({
+      id: 'hbnw-amenity-heatmap',
+      type: 'heatmap',
+      source: 'amenity_500',
+      'source-layer': 'default',
+      paint: {
+        'heatmap-weight': [
+          'interpolate', ['linear'], ['get', 'amenity_hbnw_intensity'],
+          0, 0,
+          100, 1
+        ],
+        'heatmap-intensity': [
+          'interpolate', ['linear'], ['zoom'],
+          11, 1,
+          15, 3
+        ],
+        'heatmap-color': [
+          'interpolate', ['linear'], ['heatmap-density'],
+          0, 'rgba(0, 0, 0, 0)',
+          0.2, '#00429d',
+          0.4, '#4771b2',
+          0.6, '#73a2c6',
+          0.8, '#a5d5d8',
+          1, '#00f2ff' 
+        ],
+        'heatmap-radius': [
+          'interpolate', ['linear'], ['zoom'],
+          11, 15,
+          15, 40
+        ],
+        'heatmap-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          14, 1,
+          16, 0
+        ]
+      }
+    });
+
+    map.addLayer({
+      id: 'nhb-amenity-layer-500m',
+      type: 'circle',
+      source: 'amenity_500',
+      'source-layer': 'default',
+      paint: {
+        'circle-radius': [
           'interpolate',
           ['linear'],
-          ['get', 'destination_score'],
-          0, 0.3,
-          100, 0.7
+          ['get', 'amenity_nhb_intensity'],
+          0, 0,
+          100, 18
         ],
-        'circle-blur': 0.3
+        'circle-color': [
+          'interpolate',
+          ['linear'],
+          ['get', 'amenity_nhb_intensity'],
+          0, '#1a4d6d',
+          50, '#4a9fd8',
+          100, '#6ec6ff'
+        ],
+        'circle-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          14, 0,  
+          15, 0.7 
+        ],
+        'circle-blur': 0.5
+      }
+    });
+
+    map.addLayer({
+      id: 'nhb-amenity-heatmap',
+      type: 'heatmap',
+      source: 'amenity_500',
+      'source-layer': 'default',
+      paint: {
+        'heatmap-weight': [
+          'interpolate', ['linear'], ['get', 'amenity_nhb_intensity'],
+          0, 0,
+          100, 1
+        ],
+        'heatmap-intensity': [
+          'interpolate', ['linear'], ['zoom'],
+          11, 1,
+          15, 3
+        ],
+        'heatmap-color': [
+          'interpolate', ['linear'], ['heatmap-density'],
+          0, 'rgba(0, 0, 0, 0)',
+          0.2, '#00429d',
+          0.4, '#4771b2',
+          0.6, '#73a2c6',
+          0.8, '#a5d5d8',
+          1, '#00f2ff' 
+        ],
+        'heatmap-radius': [
+          'interpolate', ['linear'], ['zoom'],
+          11, 15,
+          15, 40
+        ],
+        'heatmap-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          14, 1,
+          16, 0
+        ]
       }
     });
 
     // EDGE FLOWS
     map.addSource('peak-flow-data', {
-        type: 'vector',
-        url: 'pmtiles://./data/peak_routed_vectors_1000m_edge_flows.pmtiles',
-        attribution: ''
+      type: 'vector',
+      url: 'pmtiles://./data/rea_1000m_edge_flows_v3.pmtiles',
+      attribution: ''
     });
     map.addSource('off-peak-flow-data', {
-        type: 'vector',
-        url: 'pmtiles://./data/off_peak_routed_vectors_1000m_edge_flows.pmtiles',
-        attribution: ''
+      type: 'vector',
+      url: 'pmtiles://./data/rea_1000m_edge_flows_v3.pmtiles',
+      attribution: ''
     });
     map.addSource('weekend-flow-data', {
-        type: 'vector',
-        url: 'pmtiles://./data/weekend_routed_vectors_1000m_edge_flows.pmtiles',
-        attribution: ''
+      type: 'vector',
+      url: 'pmtiles://./data/rea_1000m_edge_flows_v3.pmtiles',
+      attribution: ''
     });
 
     map.addLayer({
@@ -470,19 +771,23 @@ document.addEventListener('DOMContentLoaded', function() {
         'line-width': [
           'interpolate',
           ['linear'],
-          ['get', 'flow'],
-          0.000001, 1.2,
-          0.0026, 10
+          ['get', 'total_flow'],
+          0.07966477843001485, 1.2,    // Median
+          1.399054811172391, 4,      // p90
+          37.315249125300056, 12      // Maximum: 
         ],
         'line-color': [
           'interpolate',
           ['linear'],
-          ['get', 'flow'],
-          0.000001, '#34d399',
-          0.00004, '#fbbf24',
-          0.0026, '#ef4444'
+          ['get', 'total_flow'],
+          0.07966477843001485, '#34d399', // Median
+          0.6013697411714708, '#fbbf24',   // p80
+          1.399054811172391, '#ef4444',   // p90 
+          2.723173461652838, '#7f1d1d',    // p95
+          37.315249125300056, '#780ff1' // Max
         ],
-        'line-opacity': 0.95
+        'line-dasharray': [2, 2],
+        'line-opacity': 0.9
       }
     });
 
@@ -546,19 +851,19 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // CONGESTIONS
     map.addSource('peak-congestion-data', {
-        type: 'vector',
-        url: 'pmtiles://./data/peak_routed_vectors_1000m_congestions.pmtiles',
-        attribution: ''
+      type: 'vector',
+      url: 'pmtiles://./data/rea_1000m_congestions_v4.pmtiles',
+      attribution: ''
     });
     map.addSource('off-peak-congestion-data', {
-        type: 'vector',
-        url: 'pmtiles://./data/off_peak_routed_vectors_1000m_congestions.pmtiles',
-        attribution: ''
+      type: 'vector',
+      url: 'pmtiles://./data/rea_1000m_congestions_v4.pmtiles',
+      attribution: ''
     });
     map.addSource('weekend-congestion-data', {
-        type: 'vector',
-        url: 'pmtiles://./data/weekend_routed_vectors_1000m_congestions.pmtiles',
-        attribution: ''
+      type: 'vector',
+      url: 'pmtiles://./data/rea_1000m_congestions_v4.pmtiles',
+      attribution: ''
     });
 
     map.addLayer({
@@ -566,31 +871,39 @@ document.addEventListener('DOMContentLoaded', function() {
       'type': 'line',
       'source': 'peak-congestion-data',
       'source-layer': 'default',
-      'filter': ['>=', ['get', 'congestion'], 1.1355],
+      'filter': ['>=', ['get', 'vc_ratio'], 0.10470038663396035], // p70
       'layout': {
         'line-join': 'round',
-        'line-cap': 'round'
+        'line-cap': 'round',
+        'line-sort-key': ['get', 'vc_ratio']
       },
       'paint': {
         'line-width': [
           'interpolate',
           ['linear'],
-          ['get', 'congestion'],
-          0, 2,
-          2.85, 6
+          ['get', 'vc_ratio'],
+          0.104700386633960358, 1.5,   // p70 
+          0.4497026527666784, 4,     // p90 
+          0.8355367868226627, 8,     // p95 
+          29.087919099787882, 12   // Max 
         ],
         'line-color': [
           'interpolate',
           ['linear'],
-          ['get', 'congestion'],
-          0.0039, '#2ecc71',
-          0.1529, '#f1c40f',
-          0.4774, '#e67e22',
-          1.1356, '#e74c3c',
-          2.0736, '#c0392b', 
-          2.8561, '#8e44ad'
+          ['get', 'vc_ratio'],
+          0.10470038663396035, '#e67e22', // p70 
+          0.20012278191347832, '#e74c3c', // p80 
+          0.4497026527666784, '#c0392b', // p90  
+          0.8355367868226627, '#800000', // p95  
+          29.087919099787882, '#780ff1'  // Max
         ],
-        'line-opacity': 0.8
+        'line-opacity': [
+          'interpolate',
+          ['linear'],
+          ['get', 'vc_ratio'],
+          0.10470038663396035, 0.5,   // p70
+          0.4497026527666784, 1      // p90
+        ]
       }
     });
 
@@ -598,7 +911,6 @@ document.addEventListener('DOMContentLoaded', function() {
       'id': 'off-peak-congestion-layer',
       'type': 'line',
       'source': 'off-peak-congestion-data',
-      'filter': ['>=', ['get', 'congestion'], 1.1355],
       'source-layer': 'default',
       'layout': {
         'line-join': 'round',
@@ -631,7 +943,6 @@ document.addEventListener('DOMContentLoaded', function() {
       'id': 'weekend-congestion-layer',
       'type': 'line',
       'source': 'weekend-congestion-data',
-      'filter': ['>=', ['get', 'congestion'], 1.1355],
       'source-layer': 'default',
       'layout': {
         'line-join': 'round',
@@ -660,7 +971,7 @@ document.addEventListener('DOMContentLoaded', function() {
       }
     });
 
-    // Initialize with only the base map 
+    // Initialize with base map (none selected)
     updateLayerUI('none');
     showLayerType('none');
 
@@ -669,23 +980,4 @@ document.addEventListener('DOMContentLoaded', function() {
     setupPanelToggle();
     setupLandingPage();
   });
-});
-
-
-// Email popup functionality
-const emailButton = document.getElementById('email-button');
-const emailPopup = document.getElementById('email-popup');
-const copyEmailBtn = document.getElementById('copy-email');
-
-emailButton.addEventListener('click', (e) => {
-  e.stopPropagation();
-  emailPopup.classList.toggle('active');
-});
-
-// Close popup when clicking outside
-document.addEventListener('click', (e) => {
-  if (!emailPopup.contains(e.target) && !emailButton.contains(e.target)) {
-    emailPopup.classList.remove('active');
-  }
-});
-
+}); // End of DOMContentLoaded

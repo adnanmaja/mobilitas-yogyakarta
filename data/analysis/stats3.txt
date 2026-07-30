@@ -1,0 +1,210 @@
+grid_services_amenities.py
+
+=== STATISTICS ===
+Total grid cells: 10088
+Cells with place of worship intensity > 0: 870
+Cells with commercial (NHB) intensity > 0: 993
+Cells with commercial (HBNW) intensity > 0: 1085
+Cells with leisure intensity > 0: 1310
+Cells with service intensity > 0: 338
+Cells with amenity_nhb_intensity > 0: 1254
+Cells with amenity_hbnw_intensity > 0: 1691
+
+Top 5 place of worship intensity cells:
+ cell_id  place_of_worship_intensity
+    5014                  100.000000
+    4918                   98.137812
+    4919                   90.471239
+    5016                   89.188632
+    5015                   86.438562
+
+Top 5 commercial (NHB) intensity cells:
+ cell_id  commercial_intensity_nhb
+    5015                100.000000
+    5016                 91.520863
+    5012                 91.052723
+    5310                 88.191710
+    5113                 86.725818
+
+Top 5 commercial (HBNW) intensity cells:
+ cell_id  commercial_intensity_hbnw
+    5015                 100.000000
+    5014                  57.553957
+    4917                  49.640288
+    5211                  47.122302
+    5307                  46.762590
+
+Top 5 leisure intensity cells:
+ cell_id  leisure_intensity
+    4918         100.000000
+    5015          96.527778
+    5012          79.861111
+    4919          75.694444
+    5013          60.416667
+
+Top 5 service intensity cells:
+ cell_id  service_intensity
+    5018         100.000000
+    5114          86.922699
+    5113          77.459667
+    5210          51.639778
+    4821          49.441323
+
+Top 5 amenity_nhb_intensity cells:
+ cell_id  amenity_nhb_intensity
+    5015             100.000000
+    4918              98.623613
+    5016              96.927102
+    5014              96.293666
+    5012              88.534000
+
+Top 5 amenity_hbnw_intensity cells:
+ cell_id  amenity_hbnw_intensity
+    5015              100.000000
+    4918               80.426587
+    5012               66.014504
+    4919               66.009116
+    5014               63.970198
+
+Average place of worship intensity (non-zero cells): 31.90
+Average commercial (NHB) intensity (non-zero cells): 18.46
+Average commercial (HBNW) intensity (non-zero cells): 3.35
+Average leisure intensity (non-zero cells): 3.09
+Average service intensity (non-zero cells): 20.49
+Place of worship scale: log1p
+Commercial (NHB) scale: sqrt
+Commercial (HBNW) scale: linear
+leisure scale: linear
+Service scale: sqrt
+
+
+Total combined trips: 467
+Number of origins: 10088
+Number of OD pairs: 5,973,595
+DISTANCES ANALYTICS
+Weighted average trip distance: 9.69 km
+HBW average: 12.00 km
+HBNW average: 6.71 km
+NHB average: 4.80 km
+
+
+
+Initial
+=== Flow Distribution Analysis ===
+Gini Coefficient: 0.8940
+Total PCU-km: 6666.82
+
+PCU-km by Road Class (%):
+  other: 12.81%
+  trunk: 37.84%
+  primary: 26.85%
+  secondary: 13.39%
+  tertiary: 9.12%
+
+Iinitial gini Coefficient: 0.8940
+Gini coffecient for iteration 1: 0.8939442242354878
+Gini coffecient for iteration 2: 0.8936911250620663
+Gini coffecient for iteration 3: 0.8940441956684838
+Gini coffecient for iteration 4: 0.894064071772808
+Gini coffecient for iteration 5: 0.8939176586781732
+
+Iteration 2 convergence check: max_change=0.6667, avg_change=0.0000, threshold=0.005   
+Iteration 3 convergence check: max_change=12.1215, avg_change=0.0017, threshold=0.005
+Iteration 4 Convergence check: max_change=1.4217, avg_change=0.0010, threshold=0.005
+Iteration 5 Convergence check: max_change=0.7683, avg_change=0.0006, threshold=0.005
+
+===============
+==================================================
+NETWORK STATISTICS Iter 1
+==================================================
+CONGESTION: 10067/133337 segments at v/c > 0.8
+
+CAR TRAVEL TIMES (seconds per segment):
+  Average: 19.77s
+  Median:  11.89s
+  Weighted Average: 10.29s (based on flow)
+
+MOTORBIKE TRAVEL TIMES (seconds per segment):
+  Average: 19.68s
+  Median:  11.81s
+  Weighted Average: 11.65s (based on flow)
+==================================================
+
+Gini coffecient for iteration 1: 0.8950635756056345
+Gini coffecient for iteration 2: 0.8947274881298258
+Gini coffecient for iteration 3: 0.895104064224076
+Gini coffecient for iteration 4: 0.8946108331379905
+Gini coffecient for iteration 5: 0.8950141059716595
+
+
+Iteration 2 convergence check: max_change=0.7765, avg_change=0.0000, threshold=0.005
+Iteration 3 convergence check: max_change=1.0038, avg_change=0.0020, threshold=0.005
+Iteration 4 convergence check: max_change=0.4225, avg_change=0.0012, threshold=0.005
+Iteration 5 convergence check: max_change=0.3487, avg_change=0.0008, threshold=0.005
+
+============================================================
+FEEDBACK LOOP COMPLETE
+============================================================
+
+==================================================
+NETWORK STATISTICS
+==================================================
+CONGESTION: 9956/133337 segments at v/c > 0.8
+
+CAR TRAVEL TIMES (seconds per segment):
+  Average: 19.77s
+  Median:  11.89s
+  Weighted Average: 10.29s (based on flow)
+
+MOTORBIKE TRAVEL TIMES (seconds per segment):
+  Average: 19.68s
+  Median:  11.81s
+  Weighted Average: 11.69s (based on flow)
+==================================================
+
+Minimum: 7.291729531289093e-08
+Maximum: 29.087919099787882
+Range:   29.087919026870587
+Average: 0.23719963356991022
+Median:  0.04830525576657152
+70th percentile: 0.14805148541927338
+80th percentile: 0.2739833069221277
+90th percentile: 0.6182424776929452
+95th percentile: 1.0941083228280408
+
+
+
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Gini coffecient for iteration 1: 0.8950635756056345
+Gini coffecient for iteration 2: 0.8947274881298258
+Gini coffecient for iteration 3: 0.895104064224076
+Gini coffecient for iteration 4: 0.8946108331379905
+Gini coffecient for iteration 5: 0.8950141059716595
+
+Convergence check: max_change=0.7765, avg_change=0.0000, threshold=0.005
+Convergence check: max_change=1.0038, avg_change=0.0011, threshold=0.005
+Convergence check: max_change=0.4370, avg_change=0.0007, threshold=0.005
+Convergence check: max_change=0.2549, avg_change=0.0004, threshold=0.005
+
+CONGESTION: 7040/133337 segments at v/c > 0.8
+
+CAR TRAVEL TIMES (seconds per segment):
+  Average: 12.09s
+  Median:  7.11s
+  Weighted Average: 6.88s (based on flow)
+
+MOTORBIKE TRAVEL TIMES (seconds per segment):
+  Average: 12.06s
+  Median:  7.08s
+  Weighted Average: 7.45s (based on flow)
+
+
+Minimum: 7.291729531289093e-08
+Maximum: 29.087919099787882
+Range:   29.087919026870587
+Average: 0.18487964811148971
+Median:  0.03223873814590661
+70th percentile: 0.10470038663396035
+80th percentile: 0.20012278191347832
+90th percentile: 0.4497026527666784
+95th percentile: 0.8355367868226627
